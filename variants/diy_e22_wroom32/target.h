@@ -1,0 +1,33 @@
+#pragma once
+
+#define RADIOLIB_STATIC_ONLY 1
+#include <RadioLib.h>
+#include <helpers/radiolib/RadioLibWrappers.h>
+#include <helpers/ESP32Board.h>
+#include <helpers/radiolib/CustomSX1262Wrapper.h>
+#include <helpers/AutoDiscoverRTCClock.h>
+#include <helpers/SensorManager.h>
+#ifdef DIY_ENV_SENSORS
+  #include <helpers/sensors/EnvironmentSensorManager.h>
+#endif
+#ifdef DISPLAY_CLASS
+  #include <helpers/ui/SH1107Display.h>
+  #include <helpers/ui/MomentaryButton.h>
+#endif
+
+extern ESP32Board board;
+extern WRAPPER_CLASS radio_driver;
+extern AutoDiscoverRTCClock rtc_clock;
+#ifdef DIY_ENV_SENSORS
+  extern EnvironmentSensorManager sensors;   // scans I2C at boot, starts only the sensors it finds
+#else
+  extern SensorManager sensors;
+#endif
+
+#ifdef DISPLAY_CLASS
+  extern DISPLAY_CLASS display;
+  extern MomentaryButton user_btn;
+#endif
+
+bool radio_init();
+mesh::LocalIdentity radio_new_identity();
