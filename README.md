@@ -26,7 +26,7 @@ SenkoOS — это обычный ретранслятор [MeshCore](https://gi
 
 | | |
 |---|---|
-| 🖥 **Веб-панель** | восемь вкладок прямо с платы: обзор, пакеты, каналы, граф путей, карта, настройки, консоль, обслуживание |
+| 🖥 **Веб-панель** | девять вкладок прямо с платы: обзор, пакеты, каналы, чат, граф путей, карта, настройки, консоль, обслуживание — на русском и английском |
 | 🧙 **Мастер первой настройки** | новая плата сама поднимает точку доступа — пароль, имя и Wi-Fi задаются с телефона, без терминала |
 | 🏠 **Home Assistant** | устройство и датчики появляются сами (MQTT discovery), обновление прошивки — кнопкой в HA |
 | 💬 **Канал «Дом»** | приватный канал MeshCore ↔ Home Assistant: команды и уведомления в чате приложения и во вкладке «Чат» панели |
@@ -165,11 +165,11 @@ SenkoOS — неофициальная сборка поверх [MeshCore](http
 
 **SenkoOS** is a [MeshCore](https://github.com/meshcore-dev/MeshCore) repeater firmware (unmodified core) for an ESP32 + EBYTE E22-900M30S board ("SenkoPhone 1.0") with:
 
-- a **web dashboard** served by the board: overview, packets, channel/route blocking, path graph with live paths and zoom, map, all settings, console, maintenance;
+- a **web dashboard** served by the board, in English or Russian: overview, packets, channel/route blocking, chat, path graph with live paths and zoom, map, all settings, console, maintenance;
 - a **first-run wizard** over the board's own access point (no serial terminal needed);
 - **Home Assistant** via MQTT discovery: traffic and radio sensors, auto-detected I2C sensors (BME/BMP280, AHT, SHT, INA…), a firmware **update entity**;
 - a private **"Home" channel** bridged to Home Assistant — commands and notifications in a normal MeshCore chat;
 - **signed OTA updates** (Ed25519 manifest, SHA-256 check, automatic rollback after failed boots), installed without stopping packet forwarding;
 - a three-page **128×128 OLED** UI.
 
-Flash `…-merged.bin` from the [latest release](https://github.com/Geraltrot/SenkoOS/releases/latest) at `0x0`, join the `SenkoPhone-Setup-XXXX` Wi-Fi shown on the screen and follow the wizard. The UI is in Russian for now. MIT license, like MeshCore.
+Flash `…-merged.bin` from the [latest release](https://github.com/Geraltrot/SenkoOS/releases/latest) at `0x0`, join the `SenkoPhone-Setup-XXXX` Wi-Fi shown on the screen and follow the wizard. The web UI speaks **English and Russian** (switch in the header; English by default for non-Russian browsers). MIT license, like MeshCore.

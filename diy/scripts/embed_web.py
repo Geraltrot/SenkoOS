@@ -13,6 +13,12 @@ dst = os.path.join(gen_dir, "web_index.h")
 
 with open(src, "rb") as fh:
     raw = fh.read()
+# inline <script src="i18n_en.js"></script> (the English dictionary) so the board serves one file
+i18n = os.path.join(os.path.dirname(src), "i18n_en.js")
+tag = b'<script src="i18n_en.js"></script>'
+if tag in raw:
+    with open(i18n, "rb") as fh:
+        raw = raw.replace(tag, b"<script>\n" + fh.read() + b"\n</script>")
 gz = gzip.compress(raw, compresslevel=9, mtime=0)
 
 lines = [

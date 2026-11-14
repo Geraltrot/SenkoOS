@@ -196,6 +196,7 @@ input[type=range]{flex:0 1 260px;padding:0;accent-color:var(--acc)}
       <button class="b" type="submit">Войти</button>
     </form>
     <div id="loginErr" class="err"></div>
+    <p class="sub" style="margin-top:14px"><a href="#" id="langLogin" style="color:var(--mut)">English / Русский</a></p>
   </div>
 </div>
 
@@ -233,6 +234,7 @@ input[type=range]{flex:0 1 260px;padding:0;accent-color:var(--acc)}
       <div class="ttl"><h1 id="name">…</h1><span class="sub"><span class="chan" id="chan" hidden></span><span id="fw">лаборатория ретранслятора</span></span></div>
       <span class="sp"></span>
       <span class="pill" id="live"><i></i><span>…</span></span>
+      <button class="q" id="lang" title="Русский / English">EN</button>
       <button class="q" id="theme" title="Тема: авто / светлая / тёмная">◐ авто</button>
       <button class="q" id="logout">выйти</button>
     </div>
@@ -365,7 +367,7 @@ input[type=range]{flex:0 1 260px;padding:0;accent-color:var(--acc)}
       </form>
       <div class="row" style="margin-top:10px" id="quick"></div>
       <div class="term"><div class="bar2"><i></i><i></i><i></i><span style="margin-left:6px">cli@repeater</span></div>
-        <pre id="out"><span class="m">Готово к экспериментам. Команды выполняются на репитере.
+        <pre id="out" class="notr"><span class="m">Готово к экспериментам. Команды выполняются на репитере.
 </span></pre></div>
     </section>
 
@@ -404,6 +406,7 @@ input[type=range]{flex:0 1 260px;padding:0;accent-color:var(--acc)}
   </main>
 </div>
 
+<script src="i18n_en.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -421,6 +424,7 @@ const NO_FWD = new Set([1, 4]);
 const RESET_RU = {power: "старт: питание", pin: "старт: кнопка RESET", software: "старт: перезагрузка/OTA", panic: "старт после сбоя", watchdog: "старт: сторож (зависание)", deepsleep: "старт: из сна", brownout: "старт: просадка питания", other: "старт: другое"};
 // server error texts -> Russian
 function errRu(m) {
+  if (LANG === "en") return m;   // the board answers in English
   const w = /^too many attempts, wait (\d+) s/.exec(m || ""); if (w) return "Слишком много попыток, подождите " + w[1] + " с";
   return ({"wrong password": "Неверный пароль", "token is wrong or expired": "Токен загрузки неверен или истёк — начните заново",
     "merged.bin: flash it over USB at 0x0, OTA needs <tag>.bin": "Это -merged.bin: его прошивают по USB на адрес 0x0. Для обновления нужен файл <тег>.bin",
@@ -564,6 +568,11 @@ async function start() {
 
 $("logout").onclick = async () => { try { await api("/api/logout", {}); } catch (e) {} showLogin(); };
 
+// language: EN / RU (dictionary and tr() in i18n_en.js); the choice is remembered in this browser
+function switchLang(e) { if (e) e.preventDefault(); try { localStorage.setItem("lang", LANG === "en" ? "ru" : "en"); } catch (x) {} location.reload(); }
+$("lang").textContent = LANG === "en" ? "RU" : "EN";
+$("lang").onclick = switchLang;
+$("langLogin").onclick = switchLang;
 const THEMES = [["", "◐ авто"], ["light", "☀ светлая"], ["dark", "☾ тёмная"]];
 function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; $("theme").textContent = (THEMES.find(x => x[0] === t) || THEMES[0])[1]; }
 let theme = ""; try { theme = localStorage.getItem("theme") || ""; } catch (e) {}
@@ -589,7 +598,7 @@ async function tick(force) {
     status = await api("/api/status");
     setLive(true);
     $("name").textContent = status.name || "Ретранслятор";
-    document.title = (status.name || "Ретранслятор") + " · лаборатория";
+    document.title = tr((status.name || "Ретранслятор") + " · лаборатория");
     const ch = CHANNELS[status.diy_channel], chEl = $("chan");
     chEl.hidden = !ch; if (ch) { chEl.textContent = ch[0]; chEl.className = "chan " + status.diy_channel; chEl.title = ch[1]; }
     $("fw").textContent = (status.board ? status.board + " · " : "") + (status.diy_version ? status.diy_version + " · " : "") + "MeshCore " + status.firmware;
@@ -1036,7 +1045,7 @@ async function loadChat() {
   chatLast = last;
   const box = $("chatBox"), atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.innerHTML = c.m.length ? c.m.map(([seq, ts, out, from, text, snr]) =>
-    '<div class="msg' + (out ? " out" : "") + '"><div class="who">' + esc(out ? "→ " + from : from || "?") + "</div>" + esc(text) +
+    '<div class="msg notr' + (out ? " out" : "") + '"><div class="who">' + esc(out ? "→ " + from : from || "?") + "</div>" + esc(text) +
     '<div class="meta">' + (ts > 1600000000 ? new Date(ts * 1000).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"}) : "") +
     (snr != null ? " · SNR " + fmtSnr(snr) : "") + "</div></div>").join("") : '<span class="dim">Пока тихо. Сообщения появятся здесь.</span>';
   if (atEnd || chatLast === last) box.scrollTop = box.scrollHeight;
