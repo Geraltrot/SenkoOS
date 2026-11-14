@@ -65,6 +65,9 @@ private:
   void handleSetupSave();
   void handleNotFound();
   void handleUpdateState();
+  void handleChat();
+  void handleChatSend();
+  void handleWatch();
   void sendOk(const char* msg = "OK");
   void sendError(int code, const char* msg);
 

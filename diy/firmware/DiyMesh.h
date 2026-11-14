@@ -132,13 +132,30 @@ public:
   // ---------- private channel "Home" <-> Home Assistant (HomeChannel.cpp) ----------
   typedef void (*HomeChatFn)(const char* sender, const char* text, int8_t snr4, uint8_t hops);
   void setHomeChatHandler(HomeChatFn fn) { _home_chat_fn = fn; }
-  void beginHome() { loadHome(); }
+  void beginHome() { loadHome(); loadWatch(); }
   bool homeChannelSet() const { return _home_set; }
   const char* homeChannelName() const { return _home_name; }
   bool sendHomeChat(const char* text);
   // long text: split into packets " [1/3]" ... and send them one by one, 12 s apart
   bool queueHomeChat(const char* text);
   int homeQueued() const { return _home_parts_n - _home_parts_i; }
+  // last messages of the channel (both ways) for the panel chat
+  struct ChatMsg { uint32_t seq, ts; uint8_t out; int8_t snr4; char from[24]; char text[152]; };
+  static const int CHAT_KEEP = 30;
+  int chatCount() const { return _chat_n; }
+  const ChatMsg& chatAt(int i) const { return _chat[(_chat_head - _chat_n + i + CHAT_KEEP) % CHAT_KEEP]; }   // 0 = oldest
+
+  // ---------- watch list: neighbours that must be heard (DiyWatch.cpp) ----------
+  static const int MAX_WATCH = 8;
+  struct Watch { uint8_t key[4]; uint8_t sz; uint8_t hours; bool heard, alarm; uint32_t last_ms; char name[24]; };
+  typedef void (*WatchFn)(const char* key_hex, const char* name, bool online, bool removed);
+  void setWatchHandler(WatchFn fn) { _watch_fn = fn; }
+  int watchCount() const { return _watch_n; }
+  Watch& watchAt(int i) { return _watch[i]; }
+  void watchKeyHex(const Watch& w, char* out) const;   // out: 9 bytes
+  uint32_t watchSilentS(const Watch& w) const;
+  void refreshWatch(Watch& w);
+  bool handleWatchCommand(const char* command, char* reply, size_t reply_len);
   bool handleHomeCommand(const char* command, char* reply, size_t reply_len);
   uint32_t home_rx = 0, home_tx = 0;
 
@@ -185,4 +202,15 @@ private:
   int _home_parts_n = 0, _home_parts_i = 0;
   uint32_t _home_next_ms = 0;
   void loopHome();
+  void addChat(uint8_t out, const char* from, const char* text, int8_t snr4);
+  ChatMsg _chat[CHAT_KEEP] = {};
+  int _chat_head = 0, _chat_n = 0;
+  uint32_t _chat_seq = 0;
+  Watch _watch[MAX_WATCH] = {};
+  int _watch_n = 0;
+  uint32_t _watch_check_ms = 0;
+  WatchFn _watch_fn = nullptr;
+  void loadWatch();
+  void saveWatch();
+  void loopWatch();
 };

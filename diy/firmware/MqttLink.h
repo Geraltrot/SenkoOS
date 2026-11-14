@@ -47,6 +47,8 @@ public:
   // re-send discovery (e.g. the channel "Home" was switched on or off)
   void requestDiscovery() { if (_connected) _need_discovery = true; }
   void setUpdater(Updater* u) { _upd = u; }
+  // watched neighbour changed (or was removed): HA binary_sensor "<name>: на связи"
+  void publishWatch(const char* key_hex, const char* name, bool online, bool removed);
 
 private:
   void load();
@@ -90,4 +92,5 @@ private:
   char _sens_known[MAX_SENS][12] = {};
   int _sens_known_n = 0;
   void publishSensors();
+  void publishAllWatch(bool discovery);
 };

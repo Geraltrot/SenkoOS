@@ -95,6 +95,7 @@ void DiyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gr
   }
   if (strcmp(sender, getNodePrefs()->node_name) == 0) return;   // our own message heard back
   home_rx++;
+  addChat(0, sender, text, (int8_t)(packet->getSNR() * 4));
   if (_home_chat_fn) _home_chat_fn(sender, text, (int8_t)(packet->getSNR() * 4), packet->getPathHashCount());
 }
 
@@ -117,7 +118,20 @@ bool DiyMesh::sendHomeChat(const char* text) {
   if (!pkt) return false;
   sendFlood(pkt, (uint32_t)0, (uint8_t)(getNodePrefs()->path_hash_mode + 1));
   home_tx++;
+  { const char* body = strstr((const char*)&temp[5], ": "); addChat(1, getNodePrefs()->node_name, body ? body + 2 : (const char*)&temp[5], 0); }
   return true;
+}
+
+void DiyMesh::addChat(uint8_t out, const char* from, const char* text, int8_t snr4) {
+  ChatMsg& m = _chat[_chat_head];
+  m.seq = ++_chat_seq;
+  m.ts = getRTCClock()->getCurrentTime();
+  m.out = out;
+  m.snr4 = snr4;
+  strlcpy(m.from, from ? from : "", sizeof(m.from));
+  strlcpy(m.text, text ? text : "", sizeof(m.text));
+  _chat_head = (_chat_head + 1) % CHAT_KEEP;
+  if (_chat_n < CHAT_KEEP) _chat_n++;
 }
 
 // ---------------------------------------------------------------------------

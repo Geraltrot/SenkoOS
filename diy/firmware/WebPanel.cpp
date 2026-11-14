@@ -96,6 +96,9 @@ void WebPanel::begin(DiyMesh* mesh, WifiLink* wifi, CommandFn run_command) {
   server.on("/api/setup", HTTP_POST, [] { self->handleSetupSave(); });
   server.on("/api/setup/scan", HTTP_GET, [] { self->handleSetupScan(); });
   server.on("/api/update", HTTP_GET, [] { self->handleUpdateState(); });
+  server.on("/api/chat", HTTP_GET, [] { self->handleChat(); });
+  server.on("/api/chat", HTTP_POST, [] { self->handleChatSend(); });
+  server.on("/api/watch", HTTP_GET, [] { self->handleWatch(); });
   server.onNotFound([] { self->handleNotFound(); });
 }
 
@@ -786,6 +789,51 @@ void WebPanel::handleUpdateState() {
   j.raw(",\"available\":").str(_updater->available()).raw(",\"channel\":").str(_updater->availableChannel());
   j.raw(",\"error\":").str(_updater->lastError());
   j.raw("}");
+  j.end();
+}
+
+// channel "Home" in the panel: last messages both ways, and sending
+void WebPanel::handleChat() {
+  if (!requireAuth()) return;
+  JsonOut j(server);
+  j.begin();
+  j.f("{\"set\":%s,\"queued\":%d,\"name\":", _mesh->homeChannelSet() ? "true" : "false", _mesh->homeQueued());
+  j.str(_mesh->homeChannelName()).raw(",\"self\":").str(_mesh->getNodePrefs()->node_name).raw(",\"m\":[");
+  for (int i = 0; i < _mesh->chatCount(); i++) {
+    const DiyMesh::ChatMsg& m = _mesh->chatAt(i);
+    if (i) j.raw(",");
+    j.f("[%lu,%lu,%u,", (unsigned long)m.seq, (unsigned long)m.ts, m.out).str(m.from).raw(",").str(m.text);
+    if (m.out) j.raw(",null]"); else j.f(",%.2f]", m.snr4 / 4.0f);
+  }
+  j.raw("]}");
+  j.end();
+}
+
+void WebPanel::handleChatSend() {
+  if (!requireAuth()) return;
+  String t = server.arg("text");
+  t.trim();
+  if (!t.length()) { sendError(400, "empty message"); return; }
+  if (!_mesh->homeChannelSet()) { sendError(409, "home channel is not set"); return; }
+  if (!_mesh->queueHomeChat(t.c_str())) { sendError(429, "a long message is still being sent"); return; }
+  sendOk("sent");
+}
+
+// watched neighbours: [["4869","zoo_rep",6,silent_s,alarm], ...]
+void WebPanel::handleWatch() {
+  if (!requireAuth()) return;
+  JsonOut j(server);
+  j.begin();
+  j.raw("{\"w\":[");
+  for (int i = 0; i < _mesh->watchCount(); i++) {
+    DiyMesh::Watch& w = _mesh->watchAt(i);
+    _mesh->refreshWatch(w);
+    char key[9];
+    _mesh->watchKeyHex(w, key);
+    if (i) j.raw(",");
+    j.raw("[").str(key).raw(",").str(w.name).f(",%u,%lu,%s]", (unsigned)w.hours, (unsigned long)_mesh->watchSilentS(w), w.alarm ? "true" : "false");
+  }
+  j.raw("]}");
   j.end();
 }
 

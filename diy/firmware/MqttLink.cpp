@@ -196,6 +196,7 @@ void MqttLink::loop() {
     publishDiscovery();
     publishUpdateState(true);
     _sens_known_n = 0;   // announce the sensors again with the next state
+    publishAllWatch(true);
     _last_state = 0;
   }
   if (_last_state == 0 || millis() - _last_state >= (uint32_t)_interval * 1000UL) {
@@ -386,9 +387,47 @@ void MqttLink::publishSensors() {
   publish(topic, state, true);
 }
 
+// watch list: one connectivity binary_sensor per watched neighbour
+void MqttLink::publishWatch(const char* key_hex, const char* name, bool online, bool removed) {
+  if (!_connected) return;
+  char topic[96], payload[600];
+  snprintf(topic, sizeof(topic), "homeassistant/binary_sensor/senkophone_%s_w_%s/config", _id, key_hex);
+  if (removed) {
+    publish(topic, "", true);
+    return;
+  }
+  char nm[48];
+  size_t o = 0;
+  for (const char* p = name; *p && o < sizeof(nm) - 2; p++) if (*p != '"' && *p != '\\') nm[o++] = *p;
+  nm[o] = 0;
+  snprintf(payload, sizeof(payload),
+           "{\"name\":\"Узел %s: на связи\",\"uniq_id\":\"senkophone_%s_w_%s\",\"stat_t\":\"%s/watch/%s\","
+           "\"dev_cla\":\"connectivity\",\"avty_t\":\"%s/status\",\"dev\":{\"ids\":[\"senkophone_%s\"]}}",
+           nm, _id, key_hex, _topic_base, key_hex, _topic_base, _id);
+  publish(topic, payload, true);
+  snprintf(topic, sizeof(topic), "%s/watch/%s", _topic_base, key_hex);
+  publish(topic, online ? "ON" : "OFF", true);
+}
+
+void MqttLink::publishAllWatch(bool discovery) {
+  if (!_mesh) return;
+  for (int i = 0; i < _mesh->watchCount(); i++) {
+    DiyMesh::Watch& w = _mesh->watchAt(i);
+    char key[9];
+    _mesh->watchKeyHex(w, key);
+    if (discovery) publishWatch(key, w.name[0] ? w.name : key, !w.alarm, false);
+    else {
+      char topic[64];
+      snprintf(topic, sizeof(topic), "%s/watch/%s", _topic_base, key);
+      publish(topic, w.alarm ? "OFF" : "ON", true);
+    }
+  }
+}
+
 void MqttLink::publishState() {
   if (!_mesh) return;
   publishSensors();
+  publishAllWatch(false);
   // last completed minute
   const DiyMesh::Bucket& m = _mesh->minutes[_mesh->minute_head];
   // airtime over the last 24 h

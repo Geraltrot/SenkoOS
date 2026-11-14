@@ -83,6 +83,7 @@ static void run_command(char* cmd, char* reply, size_t reply_len) {
   if (wifi_link.handleCommand(cmd, reply, reply_len)) return;
   if (mqtt_link.handleCommand(cmd, reply, reply_len)) return;
   if (updater.handleCommand(cmd, reply, reply_len)) return;
+  if (the_mesh.handleWatchCommand(cmd, reply, reply_len)) return;
   if (the_mesh.handleHomeCommand(cmd, reply, reply_len)) {
     if (strncmp(cmd, "home channel", 12) == 0) mqtt_link.requestDiscovery();   // add / remove the chat entities in HA
     return;
@@ -156,6 +157,9 @@ void setup() {
   }
   mqtt_link.begin(&the_mesh, &wifi_link, the_mesh.self_id.pub_key);
   web_panel.setMqtt(&mqtt_link);
+  the_mesh.setWatchHandler([](const char* key, const char* name, bool online, bool removed) {
+    mqtt_link.publishWatch(key, name, online, removed);   // watched neighbour -> Home Assistant
+  });
   the_mesh.setHomeChatHandler([](const char* from, const char* text, int8_t snr4, uint8_t hops) {
     mqtt_link.publishChatIn(from, text, snr4, hops);   // channel "Home" -> Home Assistant
   });
