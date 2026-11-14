@@ -121,6 +121,57 @@ bool DiyMesh::sendHomeChat(const char* text) {
 }
 
 // ---------------------------------------------------------------------------
+//  long messages: split into parts that fit one packet, sent 12 s apart
+//  (back-to-back flood packets arrive out of order)
+// ---------------------------------------------------------------------------
+static const uint32_t PART_GAP_MS = 12000;
+
+// largest n <= max that does not cut a UTF-8 character; prefers a line break or a space in the last third
+static int cutAt(const char* s, int len, int max) {
+  if (len <= max) return len;
+  int n = max;
+  while (n > 0 && ((uint8_t)s[n] & 0xC0) == 0x80) n--;
+  for (int k = n; k > max * 2 / 3; k--) if (s[k] == '\n') return k;
+  for (int k = n; k > max * 2 / 3; k--) if (s[k] == ' ') return k;
+  return n;
+}
+
+bool DiyMesh::queueHomeChat(const char* text) {
+  if (!_home_set || !text || !text[0]) return false;
+  int len = strlen(text);
+  // room for the text in one packet: data = timestamp(4) + type(1) + "<name>: " + text
+  int room = MAX_GROUP_DATA_LENGTH - 5 - (int)strlen(getNodePrefs()->node_name) - 2;
+  if (len <= room && homeQueued() == 0) return sendHomeChat(text);
+  if (homeQueued() > 0) return false;   // previous long message still being sent
+  int room_part = room - 7;             // " [1/6]"
+  if (room_part < 20) return false;
+  int starts[HOME_MAX_PARTS], lens[HOME_MAX_PARTS], n = 0, pos = 0;
+  while (pos < len && n < HOME_MAX_PARTS) {
+    while (pos < len && (text[pos] == ' ' || text[pos] == '\n')) pos++;   // no leading blanks in a part
+    if (pos >= len) break;
+    int l = cutAt(text + pos, len - pos, room_part);
+    starts[n] = pos; lens[n] = l; n++;
+    pos += l;
+  }
+  for (int i = 0; i < n; i++) {
+    int l = lens[i];
+    while (l > 0 && (text[starts[i] + l - 1] == ' ' || text[starts[i] + l - 1] == '\n')) l--;
+    snprintf(_home_parts[i], sizeof(_home_parts[i]), "%.*s [%d/%d]", l, text + starts[i], i + 1, n);
+  }
+  _home_parts_n = n;
+  _home_parts_i = 0;
+  _home_next_ms = millis();
+  return true;
+}
+
+void DiyMesh::loopHome() {
+  if (_home_parts_i >= _home_parts_n || (int32_t)(millis() - _home_next_ms) < 0) return;
+  sendHomeChat(_home_parts[_home_parts_i++]);
+  _home_next_ms = millis() + PART_GAP_MS;
+  if (_home_parts_i >= _home_parts_n) _home_parts_n = _home_parts_i = 0;
+}
+
+// ---------------------------------------------------------------------------
 //  CLI (local only: USB and web console; the key is never echoed)
 //    home                       status
 //    home channel <key>         channel key from the app (hex or base64)
@@ -157,7 +208,7 @@ bool DiyMesh::handleHomeCommand(const char* command, char* reply, size_t reply_l
     if (p.begin(NVS_NS, false)) { p.putString("hc_name", _home_name); p.end(); }
     snprintf(reply, reply_len, "OK - name '%s'", _home_name);
   } else if (strncmp(arg, "say ", 4) == 0) {
-    snprintf(reply, reply_len, sendHomeChat(arg + 4) ? "OK - sent" : "Err - home channel is not set");
+    snprintf(reply, reply_len, queueHomeChat(arg + 4) ? "OK - sent" : "Err - home channel is not set or a long message is still being sent");
   } else {
     snprintf(reply, reply_len, "Err - home [channel <key>|channel off|name <text>|say <text>]");
   }

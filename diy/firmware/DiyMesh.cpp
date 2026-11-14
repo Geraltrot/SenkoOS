@@ -25,6 +25,7 @@ void DiyMesh::beginDiy() {
 
 void DiyMesh::loopDiy() {
   uint32_t now = millis();
+  loopHome();   // queued parts of long messages to the channel "Home"
 
   // noise floor every 4 s
   if (now - _last_nf_ms >= 4000) {

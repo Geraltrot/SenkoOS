@@ -74,8 +74,8 @@ private:
   char _topic_base[32] = {0};           // "senkophone/1a2b3c4d"
   uint32_t _last_state = 0;
   // HA -> channel "Home": filled by the esp-mqtt task, sent from loop()
-  static const int OUTQ = 4;
-  static const int OUTQ_LEN = 168;   // more than fits in one channel packet; DiyMesh::sendHomeChat trims
+  static const int OUTQ = 3;
+  static const int OUTQ_LEN = 640;   // long texts are split into packets by DiyMesh::queueHomeChat
   char _outq[OUTQ][OUTQ_LEN] = {};
   volatile int _outq_head = 0, _outq_n = 0;
   volatile bool _need_subscribe = false;

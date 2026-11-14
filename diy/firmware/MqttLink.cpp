@@ -172,7 +172,7 @@ void MqttLink::loop() {
     publishUpdateState(false);
   }
   // HA -> channel "Home"
-  while (_outq_n > 0) {
+  while (_outq_n > 0 && (!_mesh || _mesh->homeQueued() == 0)) {   // keep order: wait until a long message is out
     char msg[OUTQ_LEN];
     portENTER_CRITICAL(&s_qmux);
     memcpy(msg, _outq[_outq_head], sizeof(msg));
@@ -186,7 +186,7 @@ void MqttLink::loop() {
       char* q2 = q1 ? strrchr(q1 + 1, '"') : nullptr;
       if (q1 && q2 && q2 > q1) { *q2 = 0; text = q1 + 1; }
     }
-    if (_mesh && text[0]) _mesh->sendHomeChat(text);
+    if (_mesh && text[0]) _mesh->queueHomeChat(text);
   }
   if (_need_discovery) {
     _need_discovery = false;

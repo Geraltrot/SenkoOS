@@ -136,6 +136,9 @@ public:
   bool homeChannelSet() const { return _home_set; }
   const char* homeChannelName() const { return _home_name; }
   bool sendHomeChat(const char* text);
+  // long text: split into packets " [1/3]" ... and send them one by one, 12 s apart
+  bool queueHomeChat(const char* text);
+  int homeQueued() const { return _home_parts_n - _home_parts_i; }
   bool handleHomeCommand(const char* command, char* reply, size_t reply_len);
   uint32_t home_rx = 0, home_tx = 0;
 
@@ -177,4 +180,9 @@ private:
   bool _home_set = false;
   char _home_name[24] = {0};
   HomeChatFn _home_chat_fn = nullptr;
+  static const int HOME_MAX_PARTS = 6;
+  char _home_parts[HOME_MAX_PARTS][MAX_GROUP_DATA_LENGTH] = {};
+  int _home_parts_n = 0, _home_parts_i = 0;
+  uint32_t _home_next_ms = 0;
+  void loopHome();
 };
