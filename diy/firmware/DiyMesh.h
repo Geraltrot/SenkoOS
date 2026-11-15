@@ -132,18 +132,31 @@ public:
   // ---------- private channel "Home" <-> Home Assistant (HomeChannel.cpp) ----------
   typedef void (*HomeChatFn)(const char* sender, const char* text, int8_t snr4, uint8_t hops);
   void setHomeChatHandler(HomeChatFn fn) { _home_chat_fn = fn; }
-  void beginHome() { loadHome(); loadWatch(); }
+  void beginHome() { loadHome(); loadChans(); loadWatch(); }
   bool homeChannelSet() const { return _home_set; }
   const char* homeChannelName() const { return _home_name; }
-  bool sendHomeChat(const char* text);
-  // long text: split into packets " [1/3]" ... and send them one by one, 12 s apart
-  bool queueHomeChat(const char* text);
+  bool sendHomeChat(const char* text) { return sendChat(0, text); }
+  bool queueHomeChat(const char* text) { return queueChat(0, text); }
+  // chat channels: 0 = "Home" (bridged to Home Assistant), 1..MAX_EXTRA_CH = extra channels for the panel chat only
+  static const int MAX_EXTRA_CH = 4, NUM_CH = 1 + MAX_EXTRA_CH;
+  bool chanSet(int c) const;
+  const char* chanName(int c) const;
+  uint8_t chanHash(int c) const;
+  bool sendChat(int c, const char* text);
+  // long text: split into packets " [1/3]" ... and send them one by one, 12 s apart (one long text at a time)
+  bool queueChat(int c, const char* text);
   int homeQueued() const { return _home_parts_n - _home_parts_i; }
-  // last messages of the channel (both ways) for the panel chat
+  int queuedChan() const { return _home_parts_ch; }
+  // last messages of each channel (both ways) for the panel chat
   struct ChatMsg { uint32_t seq, ts; uint8_t out; int8_t snr4; char from[24]; char text[152]; };
-  static const int CHAT_KEEP = 30;
-  int chatCount() const { return _chat_n; }
-  const ChatMsg& chatAt(int i) const { return _chat[(_chat_head - _chat_n + i + CHAT_KEEP) % CHAT_KEEP]; }   // 0 = oldest
+  static const int CHAT_KEEP = 30, CHAT_KEEP_X = 16;   // "Home" / each extra channel
+  int chatCount(int c) const { return _chat_n[c]; }
+  uint32_t chatLastSeq(int c) const { return _chat_last[c]; }
+  const ChatMsg& chatAt(int c, int i) const {   // 0 = oldest
+    int k = c ? CHAT_KEEP_X : CHAT_KEEP, b = c ? CHAT_KEEP + (c - 1) * CHAT_KEEP_X : 0;
+    return _chat[b + (_chat_head[c] - _chat_n[c] + i + k) % k];
+  }
+  bool handleChanCommand(const char* command, char* reply, size_t reply_len);
 
   // ---------- watch list: neighbours that must be heard (DiyWatch.cpp) ----------
   static const int MAX_WATCH = 8;
@@ -202,10 +215,17 @@ private:
   int _home_parts_n = 0, _home_parts_i = 0;
   uint32_t _home_next_ms = 0;
   void loopHome();
-  void addChat(uint8_t out, const char* from, const char* text, int8_t snr4);
-  ChatMsg _chat[CHAT_KEEP] = {};
-  int _chat_head = 0, _chat_n = 0;
+  void addChat(int c, uint8_t out, const char* from, const char* text, int8_t snr4);
+  ChatMsg _chat[CHAT_KEEP + MAX_EXTRA_CH * CHAT_KEEP_X] = {};
+  int _chat_head[NUM_CH] = {}, _chat_n[NUM_CH] = {};
+  uint32_t _chat_last[NUM_CH] = {};
   uint32_t _chat_seq = 0;
+  struct ExtraChan { mesh::GroupChannel ch; uint8_t len; char name[24]; uint32_t rx, tx; };   // len 0 = free slot
+  ExtraChan _xch[MAX_EXTRA_CH] = {};
+  int _home_parts_ch = 0;
+  const mesh::GroupChannel* chanKey(int c) const;
+  void loadChans();
+  void saveChans();
   Watch _watch[MAX_WATCH] = {};
   int _watch_n = 0;
   uint32_t _watch_check_ms = 0;

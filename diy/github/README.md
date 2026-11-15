@@ -29,7 +29,7 @@ SenkoOS — это обычный ретранслятор [MeshCore](https://gi
 | 🖥 **Веб-панель** | девять вкладок прямо с платы: обзор, пакеты, каналы, чат, граф путей, карта, настройки, консоль, обслуживание — на русском и английском |
 | 🧙 **Мастер первой настройки** | новая плата сама поднимает точку доступа — пароль, имя и Wi-Fi задаются с телефона, без терминала |
 | 🏠 **Home Assistant** | устройство и датчики появляются сами (MQTT discovery), обновление прошивки — кнопкой в HA |
-| 💬 **Канал «Дом»** | приватный канал MeshCore ↔ Home Assistant: команды и уведомления в чате приложения и во вкладке «Чат» панели |
+| 💬 **Канал «Дом»** | приватный канал MeshCore ↔ Home Assistant: команды и уведомления в чате приложения и во вкладке «Чат» панели; ещё до 4 каналов (ключ, #хэштег, Public) — чат прямо в браузере |
 | 👁 **Наблюдение за узлами** | ключевой репитер молчит дольше N часов — тревога в канал и в Home Assistant, «снова на связи» — когда вернулся |
 | 🔄 **Автообновление** | только подписанные (Ed25519) выпуски, проверка SHA-256, возврат на прежнюю версию при сбоях |
 | 📟 **Экран OLED** | три страницы: трафик, радио, система — листаются кнопкой |
@@ -168,7 +168,7 @@ SenkoOS — неофициальная сборка поверх [MeshCore](http
 - a **web dashboard** served by the board, in English or Russian: overview, packets, channel/route blocking, chat, path graph with live paths and zoom, map, all settings, console, maintenance;
 - a **first-run wizard** over the board's own access point (no serial terminal needed);
 - **Home Assistant** via MQTT discovery: traffic and radio sensors, auto-detected I2C sensors (BME/BMP280, AHT, SHT, INA…), a firmware **update entity**;
-- a private **"Home" channel** bridged to Home Assistant — commands and notifications in a normal MeshCore chat;
+- a private **"Home" channel** bridged to Home Assistant — commands and notifications in a normal MeshCore chat — plus up to 4 more channels (key, #hashtag, Public) to chat from the browser;
 - **signed OTA updates** (Ed25519 manifest, SHA-256 check, automatic rollback after failed boots), installed without stopping packet forwarding;
 - a three-page **128×128 OLED** UI.
 

@@ -1,4 +1,5 @@
-// Private group channel "Home": a chat in the MeshCore app that is bridged to Home Assistant.
+// Private group channel "Home": a chat in the MeshCore app that is bridged to Home Assistant,
+// plus up to 4 extra channels (private key, #hashtag or Public) that are only shown in the panel chat.
 // Uses the upstream group-channel API (searchChannelsByHash / onGroupDataRecv / createGroupDatagram),
 // the MeshCore core is not modified.
 #include "DiyMesh.h"
@@ -71,17 +72,71 @@ void DiyMesh::loadHome() {
 // ---------------------------------------------------------------------------
 //  mesh hooks
 // ---------------------------------------------------------------------------
-int DiyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
-  if (_home_set && max_matches > 0 && hash[0] == _home.hash[0]) {
-    channels[0] = _home;
-    return 1;
+// ---------------------------------------------------------------------------
+//  channels: 0 = "Home", 1..MAX_EXTRA_CH = extra ones
+// ---------------------------------------------------------------------------
+const mesh::GroupChannel* DiyMesh::chanKey(int c) const {
+  if (c == 0) return _home_set ? &_home : nullptr;
+  if (c < 1 || c > MAX_EXTRA_CH || !_xch[c - 1].len) return nullptr;
+  return &_xch[c - 1].ch;
+}
+bool DiyMesh::chanSet(int c) const { return chanKey(c) != nullptr; }
+const char* DiyMesh::chanName(int c) const { return c == 0 ? _home_name : (c <= MAX_EXTRA_CH ? _xch[c - 1].name : ""); }
+uint8_t DiyMesh::chanHash(int c) const { const mesh::GroupChannel* k = chanKey(c); return k ? k->hash[0] : 0; }
+
+struct StoredChan { uint8_t len; uint8_t key[32]; char name[24]; };
+
+void DiyMesh::loadChans() {
+  StoredChan sc[MAX_EXTRA_CH];
+  Preferences p;
+  if (!p.begin(NVS_NS, true)) return;
+  bool ok = p.getBytesLength("xch") == sizeof(sc) && p.getBytes("xch", sc, sizeof(sc)) == sizeof(sc);
+  p.end();
+  if (!ok) return;
+  for (int i = 0; i < MAX_EXTRA_CH; i++) {
+    ExtraChan& x = _xch[i];
+    memset(&x, 0, sizeof(x));
+    if (sc[i].len != 16 && sc[i].len != 32) continue;
+    x.len = sc[i].len;
+    memcpy(x.ch.secret, sc[i].key, x.len);
+    mesh::Utils::sha256(x.ch.hash, sizeof(x.ch.hash), x.ch.secret, x.len);
+    memcpy(x.name, sc[i].name, sizeof(x.name) - 1);
   }
-  return 0;
+  memset(sc, 0, sizeof(sc));
+}
+
+void DiyMesh::saveChans() {
+  StoredChan sc[MAX_EXTRA_CH] = {};
+  for (int i = 0; i < MAX_EXTRA_CH; i++) {
+    sc[i].len = _xch[i].len;
+    memcpy(sc[i].key, _xch[i].ch.secret, 32);
+    strlcpy(sc[i].name, _xch[i].name, sizeof(sc[i].name));
+  }
+  Preferences p;
+  if (p.begin(NVS_NS, false)) { p.putBytes("xch", sc, sizeof(sc)); p.end(); }
+  memset(sc, 0, sizeof(sc));
+}
+
+// ---------------------------------------------------------------------------
+//  mesh hooks
+// ---------------------------------------------------------------------------
+int DiyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
+  int n = 0;
+  for (int c = 0; c < NUM_CH && n < max_matches; c++) {
+    const mesh::GroupChannel* k = chanKey(c);
+    if (k && hash[0] == k->hash[0]) channels[n++] = *k;
+  }
+  return n;
 }
 
 void DiyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) {
-  if (type != PAYLOAD_TYPE_GRP_TXT || !_home_set || len < 6) return;
-  if (memcmp(channel.secret, _home.secret, sizeof(_home.secret)) != 0) return;
+  if (type != PAYLOAD_TYPE_GRP_TXT || len < 6) return;
+  int c = -1;
+  for (int i = 0; i < NUM_CH && c < 0; i++) {
+    const mesh::GroupChannel* k = chanKey(i);
+    if (k && memcmp(channel.secret, k->secret, sizeof(k->secret)) == 0) c = i;
+  }
+  if (c < 0) return;
   if ((data[4] >> 2) != 0) return;   // plain text only
   data[len] = 0;
   char* text = (char*)&data[5];
@@ -94,13 +149,15 @@ void DiyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gr
     text = sep + 2;
   }
   if (strcmp(sender, getNodePrefs()->node_name) == 0) return;   // our own message heard back
+  addChat(c, 0, sender, text, (int8_t)(packet->getSNR() * 4));
+  if (c > 0) { _xch[c - 1].rx++; return; }   // extra channels: panel only, not Home Assistant
   home_rx++;
-  addChat(0, sender, text, (int8_t)(packet->getSNR() * 4));
   if (_home_chat_fn) _home_chat_fn(sender, text, (int8_t)(packet->getSNR() * 4), packet->getPathHashCount());
 }
 
-bool DiyMesh::sendHomeChat(const char* text) {
-  if (!_home_set || !text || !text[0]) return false;
+bool DiyMesh::sendChat(int c, const char* text) {
+  const mesh::GroupChannel* key = chanKey(c);
+  if (!key || !text || !text[0]) return false;
   // one group packet carries at most MAX_GROUP_DATA_LENGTH bytes: timestamp(4) + type(1) + "<name>: <text>"
   uint8_t temp[MAX_GROUP_DATA_LENGTH + 1];
   uint32_t ts = getRTCClock()->getCurrentTimeUnique();
@@ -114,24 +171,26 @@ bool DiyMesh::sendHomeChat(const char* text) {
     while (n > 0 && (temp[5 + n] & 0xC0) == 0x80) n--;
     temp[5 + n] = 0;
   }
-  mesh::Packet* pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, _home, temp, 5 + n);
+  mesh::Packet* pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, *key, temp, 5 + n);
   if (!pkt) return false;
   sendFlood(pkt, (uint32_t)0, (uint8_t)(getNodePrefs()->path_hash_mode + 1));
-  home_tx++;
-  { const char* body = strstr((const char*)&temp[5], ": "); addChat(1, getNodePrefs()->node_name, body ? body + 2 : (const char*)&temp[5], 0); }
+  if (c == 0) home_tx++; else _xch[c - 1].tx++;
+  { const char* body = strstr((const char*)&temp[5], ": "); addChat(c, 1, getNodePrefs()->node_name, body ? body + 2 : (const char*)&temp[5], 0); }
   return true;
 }
 
-void DiyMesh::addChat(uint8_t out, const char* from, const char* text, int8_t snr4) {
-  ChatMsg& m = _chat[_chat_head];
+void DiyMesh::addChat(int c, uint8_t out, const char* from, const char* text, int8_t snr4) {
+  int k = c ? CHAT_KEEP_X : CHAT_KEEP, b = c ? CHAT_KEEP + (c - 1) * CHAT_KEEP_X : 0;
+  ChatMsg& m = _chat[b + _chat_head[c]];
   m.seq = ++_chat_seq;
+  _chat_last[c] = m.seq;
   m.ts = getRTCClock()->getCurrentTime();
   m.out = out;
   m.snr4 = snr4;
   strlcpy(m.from, from ? from : "", sizeof(m.from));
   strlcpy(m.text, text ? text : "", sizeof(m.text));
-  _chat_head = (_chat_head + 1) % CHAT_KEEP;
-  if (_chat_n < CHAT_KEEP) _chat_n++;
+  _chat_head[c] = (_chat_head[c] + 1) % k;
+  if (_chat_n[c] < k) _chat_n[c]++;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,12 +209,12 @@ static int cutAt(const char* s, int len, int max) {
   return n;
 }
 
-bool DiyMesh::queueHomeChat(const char* text) {
-  if (!_home_set || !text || !text[0]) return false;
+bool DiyMesh::queueChat(int c, const char* text) {
+  if (!chanSet(c) || !text || !text[0]) return false;
   int len = strlen(text);
   // room for the text in one packet: data = timestamp(4) + type(1) + "<name>: " + text
   int room = MAX_GROUP_DATA_LENGTH - 5 - (int)strlen(getNodePrefs()->node_name) - 2;
-  if (len <= room && homeQueued() == 0) return sendHomeChat(text);
+  if (len <= room && homeQueued() == 0) return sendChat(c, text);
   if (homeQueued() > 0) return false;   // previous long message still being sent
   int room_part = room - 7;             // " [1/6]"
   if (room_part < 20) return false;
@@ -174,13 +233,14 @@ bool DiyMesh::queueHomeChat(const char* text) {
   }
   _home_parts_n = n;
   _home_parts_i = 0;
+  _home_parts_ch = c;
   _home_next_ms = millis();
   return true;
 }
 
 void DiyMesh::loopHome() {
   if (_home_parts_i >= _home_parts_n || (int32_t)(millis() - _home_next_ms) < 0) return;
-  sendHomeChat(_home_parts[_home_parts_i++]);
+  sendChat(_home_parts_ch, _home_parts[_home_parts_i++]);
   _home_next_ms = millis() + PART_GAP_MS;
   if (_home_parts_i >= _home_parts_n) _home_parts_n = _home_parts_i = 0;
 }
@@ -225,6 +285,93 @@ bool DiyMesh::handleHomeCommand(const char* command, char* reply, size_t reply_l
     snprintf(reply, reply_len, queueHomeChat(arg + 4) ? "OK - sent" : "Err - home channel is not set or a long message is still being sent");
   } else {
     snprintf(reply, reply_len, "Err - home [channel <key>|channel off|name <text>|say <text>]");
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+//  extra chat channels (local CLI only; keys are never echoed)
+//    chan                               list
+//    chan add <key|#hashtag|public> [name]
+//    chan del <N>                       N = 1..4
+//    chan name <N> <text>
+//    chan say <N> <text>
+// ---------------------------------------------------------------------------
+static const uint8_t PUBLIC_KEY[16] = {0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a, 0xc9, 0xe5, 0xed, 0xba, 0xa1, 0x15, 0xcd, 0x72};
+
+static int chanIndex(const char* s) { int n = atoi(s); return (n >= 1 && n <= DiyMesh::MAX_EXTRA_CH) ? n : 0; }
+
+bool DiyMesh::handleChanCommand(const char* command, char* reply, size_t reply_len) {
+  if (strncmp(command, "chan", 4) != 0 || (command[4] != 0 && command[4] != ' ')) return false;
+  const char* arg = command + 4;
+  while (*arg == ' ') arg++;
+
+  if (*arg == 0 || strcmp(arg, "list") == 0) {
+    size_t o = snprintf(reply, reply_len, "chan:");
+    for (int i = 0; i < MAX_EXTRA_CH && o < reply_len; i++) {
+      const ExtraChan& x = _xch[i];
+      if (x.len) o += snprintf(reply + o, reply_len - o, " %d '%s' (hash %02X, rx %lu, tx %lu);", i + 1, x.name, x.ch.hash[0], (unsigned long)x.rx, (unsigned long)x.tx);
+      else o += snprintf(reply + o, reply_len - o, " %d -;", i + 1);
+    }
+  } else if (strncmp(arg, "add ", 4) == 0) {
+    char k[96]; const char* rest = arg + 4;
+    while (*rest == ' ') rest++;
+    int kl = 0;
+    while (rest[kl] && rest[kl] != ' ' && kl < (int)sizeof(k) - 1) { k[kl] = rest[kl]; kl++; }
+    k[kl] = 0;
+    const char* name = rest + kl;
+    while (*name == ' ') name++;
+    uint8_t key[32] = {0}; int n = 0; char defname[24] = "";
+    if (k[0] == '#' && k[1]) {   // hashtag channel: key = first 16 bytes of sha256("#tag"), readable by anyone who knows the tag
+      mesh::Utils::sha256(key, 16, (const uint8_t*)k, strlen(k));
+      n = 16; strlcpy(defname, k, sizeof(defname));
+    } else if (strcasecmp(k, "public") == 0) {
+      memcpy(key, PUBLIC_KEY, 16); n = 16; strcpy(defname, "Public");
+    } else {
+      n = parseHomeKey(k, key);
+      strcpy(defname, "Channel");
+    }
+    memset(k, 0, sizeof(k));
+    if (!n) { snprintf(reply, reply_len, "Err - key: 32/64 hex chars, base64, #hashtag or public"); return true; }
+    for (int c = 0; c < NUM_CH; c++) {
+      const mesh::GroupChannel* ck = chanKey(c);
+      if (ck && memcmp(ck->secret, key, 32) == 0) { memset(key, 0, sizeof(key)); snprintf(reply, reply_len, "Err - this channel is already added (%d)", c); return true; }
+    }
+    int slot = -1;
+    for (int i = 0; i < MAX_EXTRA_CH && slot < 0; i++) if (!_xch[i].len) slot = i;
+    if (slot < 0) { memset(key, 0, sizeof(key)); snprintf(reply, reply_len, "Err - all %d channels are used (chan del <N>)", MAX_EXTRA_CH); return true; }
+    ExtraChan& x = _xch[slot];
+    memset(&x, 0, sizeof(x));
+    x.len = (uint8_t)n;
+    memcpy(x.ch.secret, key, n);
+    mesh::Utils::sha256(x.ch.hash, sizeof(x.ch.hash), x.ch.secret, n);
+    strlcpy(x.name, *name ? name : defname, sizeof(x.name));
+    memset(key, 0, sizeof(key));
+    _chat_n[slot + 1] = _chat_head[slot + 1] = 0;
+    saveChans();
+    snprintf(reply, reply_len, "OK - channel %d '%s' (hash %02X)", slot + 1, x.name, x.ch.hash[0]);
+  } else if (strncmp(arg, "del ", 4) == 0) {
+    int c = chanIndex(arg + 4);
+    if (!c || !_xch[c - 1].len) { snprintf(reply, reply_len, "Err - no channel %s", arg + 4); return true; }
+    if (homeQueued() > 0 && _home_parts_ch == c) _home_parts_n = _home_parts_i = 0;
+    memset(&_xch[c - 1], 0, sizeof(ExtraChan));
+    _chat_n[c] = _chat_head[c] = 0;
+    saveChans();
+    snprintf(reply, reply_len, "OK - channel %d removed", c);
+  } else if (strncmp(arg, "name ", 5) == 0) {
+    int c = chanIndex(arg + 5);
+    const char* t = strchr(arg + 5, ' ');
+    if (!c || !_xch[c - 1].len || !t || !t[1]) { snprintf(reply, reply_len, "Err - chan name <N> <text>"); return true; }
+    strlcpy(_xch[c - 1].name, t + 1, sizeof(_xch[c - 1].name));
+    saveChans();
+    snprintf(reply, reply_len, "OK - channel %d '%s'", c, _xch[c - 1].name);
+  } else if (strncmp(arg, "say ", 4) == 0) {
+    int c = chanIndex(arg + 4);
+    const char* t = strchr(arg + 4, ' ');
+    if (!c || !t || !t[1]) { snprintf(reply, reply_len, "Err - chan say <N> <text>"); return true; }
+    snprintf(reply, reply_len, queueChat(c, t + 1) ? "OK - sent" : "Err - no such channel or a long message is still being sent");
+  } else {
+    snprintf(reply, reply_len, "Err - chan [add <key|#tag|public> [name]|del <N>|name <N> <text>|say <N> <text>]");
   }
   return true;
 }

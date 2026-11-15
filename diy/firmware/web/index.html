@@ -120,6 +120,10 @@ pre{margin:0;background:var(--term);color:var(--term-fg);min-height:220px;max-he
 pre .c{color:#5cc8ff}pre .e{color:#ff8b8b}pre .m{color:#5f7d6c}
 /* network graph */
 .chatbox{display:flex;flex-direction:column;gap:8px;max-height:60vh;min-height:240px;overflow:auto;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card2)}
+.chtabs{gap:6px;margin:0 0 4px}
+.chtab{background:var(--card);color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer}
+.chtab.on{border-color:var(--acc);color:var(--fg);font-weight:700}
+.chtab .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--acc);margin-left:6px;vertical-align:middle}
 .msg{align-self:flex-start;max-width:80%;padding:7px 11px;border-radius:12px;background:var(--card);border:1px solid var(--line);white-space:pre-wrap;word-break:break-word}
 .msg.out{align-self:flex-end;border-color:var(--acc)}
 .msg .who{font-size:11.5px;color:var(--acc);font-weight:700;margin-bottom:2px}
@@ -307,11 +311,15 @@ input[type=range]{flex:0 1 260px;padding:0;accent-color:var(--acc)}
 
     <!-- ================= NETWORK ================= -->
     <section id="tab-chat" class="hidden">
-      <h2 id="chatTitle">Канал «Дом»</h2>
+      <div class="row chtabs" id="chatChans"></div>
+      <div class="row" style="justify-content:space-between"><h2 id="chatTitle">Канал «Дом»</h2><button class="q red hidden" id="chanDel" type="button">удалить канал</button></div>
       <p class="note" id="chatNote">Сообщения приватного канала MeshCore: то же, что в приложении, и ответы Home Assistant. Хранятся последние 30 с момента загрузки платы.</p>
       <div class="chatbox" id="chatBox"><span class="dim">Загрузка…</span></div>
       <form class="row" id="chatForm" style="margin-top:10px"><input id="chatIn" style="flex:1" maxlength="600" placeholder="сообщение в канал" autocomplete="off"><button class="b" type="submit">Отправить</button></form>
       <p class="note">Длинный текст плата делит на части [1/n] и шлёт с паузой 12 с. Сообщение уходит от имени ретранслятора.</p>
+      <h2>Дополнительные каналы</h2>
+      <p class="note">До 4 каналов вдобавок к «Дому» — только для чата в панели: в Home Assistant они не передаются, команды и тревоги работают через «Дом». Ключ — как в приложении (hex или base64), #хэштег или public. Каналы #хэштег и Public не приватные: их читает любой, кто знает название.</p>
+      <form class="row" id="chanForm"><input id="chanKey" class="mono" style="flex:1;min-width:200px" placeholder="ключ, #хэштег или public" autocomplete="off"><input id="chanName" style="width:170px" maxlength="23" placeholder="имя (необязательно)" autocomplete="off"><button class="b" type="submit">Добавить канал</button></form>
     </section>
 
     <section id="tab-network" class="hidden">
@@ -434,7 +442,7 @@ function errRu(m) {
     "admin password must not be the factory one": "Нужен свой пароль, не заводской", "name: at most 31 characters": "Имя: не длиннее 31 символа",
     "wifi: name up to 32, password up to 64 characters": "Wi-Fi: имя до 32, пароль до 64 символов",
     "coordinates: latitude -90..90, longitude -180..180": "Координаты: широта от -90 до 90, долгота от -180 до 180",
-    "radio: check frequency, BW, SF (5-12), CR (5-8)": "Радио: проверьте частоту, BW, SF (5–12), CR (5–8)", "already applying": "Настройки уже применяются", "empty message": "Пустое сообщение", "home channel is not set": "Канал «Дом» не задан",
+    "radio: check frequency, BW, SF (5-12), CR (5-8)": "Радио: проверьте частоту, BW, SF (5–12), CR (5–8)", "already applying": "Настройки уже применяются", "empty message": "Пустое сообщение", "home channel is not set": "Канал «Дом» не задан", "channel is not set": "Канал не задан",
     "a long message is still being sent": "Ещё отправляется предыдущее длинное сообщение"})[m] || m;
 }
 const NO_FWD_HINT = "не пересылает трассировку: телефон без режима повторителя или датчик";
@@ -1032,11 +1040,32 @@ async function loadTrace() {
   } catch (e) {}
 }
 
-// ---------- chat: channel "Home" ----------
-let chatLast = -1;
+// ---------- chat: channel "Home" + extra channels ----------
+let chatLast = -1, chatCh = 0, chatSeen = {};
+try { chatSeen = JSON.parse(localStorage.getItem("chatSeen") || "{}") || {}; } catch (e) {}
+const CHAT_NOTE_HOME = "Сообщения приватного канала MeshCore: то же, что в приложении, и ответы Home Assistant. Хранятся последние 30 с момента загрузки платы.";
+const CHAT_NOTE_X = "Дополнительный канал: только чат в панели, в Home Assistant не передаётся. Хранятся последние 16 сообщений с момента загрузки платы.";
+function chatSelect(ch) { chatCh = ch; chatLast = -1; loadChat(); }
 async function loadChat() {
   let c;
-  try { c = await api("/api/chat"); } catch (e) { return; }
+  const want = chatCh;
+  try { c = await api("/api/chat?ch=" + want); } catch (e) { return; }
+  if (want !== chatCh) return;
+  const chans = c.chans || [[0, c.name, c.set, 0, 0]];
+  if (chatCh > 0 && !(chans[chatCh] && chans[chatCh][2])) { chatSelect(0); return; }   // channel was removed
+  // unread marks: last message number per channel vs. what this browser has shown (numbers restart after a reboot)
+  const maxLast = Math.max(0, ...chans.map(x => x[4]));
+  if (Object.values(chatSeen).some(v => v > maxLast)) chatSeen = {};
+  chans.forEach(x => { if (chatSeen[x[0]] == null) chatSeen[x[0]] = x[4]; });
+  chatSeen[chatCh] = (chans[chatCh] || [0, "", 0, 0, 0])[4];
+  try { localStorage.setItem("chatSeen", JSON.stringify(chatSeen)); } catch (e) {}
+  $("chatChans").innerHTML = chans.filter(x => x[0] === 0 || x[2]).length > 1 ? chans.filter(x => x[0] === 0 || x[2]).map(([i, name, set, hash, last]) =>
+    '<button type="button" class="chtab' + (i === chatCh ? " on" : "") + '" data-ch="' + i + '">' + esc(name || (i ? "#" + i : "Дом")) +
+    (i !== chatCh && last > (chatSeen[i] || 0) ? '<span class="dot" title="новые сообщения"></span>' : "") + "</button>").join("") : "";
+  document.querySelectorAll("[data-ch]").forEach(b => b.onclick = () => chatSelect(+b.dataset.ch));
+  $("chanDel").classList.toggle("hidden", chatCh === 0);
+  $("chatNote").textContent = chatCh ? CHAT_NOTE_X : CHAT_NOTE_HOME;
+  $("chatIn").placeholder = "сообщение в канал";
   $("chatTitle").textContent = "Канал «" + (c.name || "Дом") + "»" + (c.queued ? " · отправляется ещё " + c.queued + " ч." : "");
   if (!c.set) { $("chatBox").innerHTML = '<span class="dim">Канал не задан: «Настройки → Канал «Дом»» — ключ канала из приложения.</span>'; $("chatForm").classList.add("hidden"); return; }
   $("chatForm").classList.remove("hidden");
@@ -1053,8 +1082,26 @@ async function loadChat() {
 $("chatForm").onsubmit = async e => {
   e.preventDefault();
   const t = $("chatIn").value.trim(); if (!t) return;
-  try { await api("/api/chat", {text: t}); $("chatIn").value = ""; chatLast = -1; setTimeout(loadChat, 500); }
+  try { await api("/api/chat", {text: t, ch: chatCh}); $("chatIn").value = ""; chatLast = -1; setTimeout(loadChat, 500); }
   catch (err) { if (err.message !== "login") toast(errRu(err.message), true); }
+};
+$("chanForm").onsubmit = async e => {
+  e.preventDefault();
+  const k = $("chanKey").value.trim().replace(/\s+/g, ""), n = $("chanName").value.trim();
+  if (!k) { toast("Введите ключ канала, #хэштег или public", true); return; }
+  let r;
+  try { r = await cli("chan add " + k + (n ? " " + n : "")); } catch (err) { return; }
+  const bad = /^err/i.test(r);
+  toast(r, bad);
+  if (bad) return;
+  $("chanKey").value = ""; $("chanName").value = "";
+  const m = r.match(/channel (\d+)/);
+  chatSelect(m ? +m[1] : chatCh);
+};
+$("chanDel").onclick = async () => {
+  if (chatCh === 0 || !confirm("Удалить канал «" + ($("chatTitle").textContent.match(/«(.*)»/) || ["", ""])[1] + "» с платы?")) return;
+  try { const r = await cli("chan del " + chatCh); toast(r, /^err/i.test(r)); } catch (err) { return; }
+  chatSelect(0);
 };
 
 // ---------- watch list ----------
@@ -1335,7 +1382,12 @@ $("rebootBtn").onclick = reboot;
 $("setupBtn").onclick = async () => { try { showSetup(await api("/api/setup")); } catch (e) { if (e.message !== "login") toast(errRu(e.message), true); } };
 
 // ---------- demo data (opened from disk) ----------
-const D = {chat: [
+const D = {cseq: 100, xch: {
+  1: {name: "Public", m: [
+    [101, Math.floor(Date.now() / 1000) - 900, 0, "Alpha Rep", "test 1-2-3, who hears me?", 4.5],
+    [102, Math.floor(Date.now() / 1000) - 840, 0, "Kostya", "слышу тебя через Echo Rep", -3.25],
+    [103, Math.floor(Date.now() / 1000) - 300, 0, "Bravo", "new repeater on the hill is up", 6]]},
+  2: {name: "#lora", m: [[104, Math.floor(Date.now() / 1000) - 200, 0, "Nina", "кто-нибудь пробовал SF8 на 62.5?", 2.75]]}}, chat: [
   [1, Math.floor(Date.now() / 1000) - 600, 0, "Ivan", "погода", 7.25],
   [2, Math.floor(Date.now() / 1000) - 590, 1, "Demo Repeater", "⛅ Сейчас: перем. обл.\n🌡 4.5° (ощ. -0.3°)\n💧 77%  💨 14 км/ч\n🔽 987 гПа [1/3]", null],
   [3, Math.floor(Date.now() / 1000) - 578, 1, "Demo Repeater", "☁ 13.11 облачно 5°/1° 💧91% 💨18\n🌧 14.11 дождь 11°/4° 💧98% 💨22 [2/3]", null],
@@ -1356,9 +1408,12 @@ function demo(p, body) {
         radio: {freq: 868.918, bw: 62.5, sf: 9, cr: 7}, wifi_ssid: ""});
   if (p.startsWith("/api/setup/scan")) return r({scanning: false, nets: [["DemoWiFi", -48, true], ["Neighbour_5G_no", -80, true], ["Cafe Free", -71, false]]});
   if (p === "/api/update") return r({mode: 1, beta: false, key: true, rolled_back: false, progress: 0, checked_ago: 3600, state: "idle", url: "https://github.com/example/senkophone/releases/latest/download/manifest.json", available: "v1.4.0-e22wroom-mc1.18.0-20261120", channel: "release", error: ""});
-  if (p === "/api/chat") {
-    if (body) { D.chat.push([D.chat.length + 1, Math.floor(Date.now() / 1000), 1, "Demo Repeater", body.text, null]); return r({ok: true}); }
-    return r({set: true, queued: 0, name: "Дом", self: "Demo Repeater", m: D.chat});
+  if (p.startsWith("/api/chat")) {
+    const ch = +(body ? body.ch : (p.split("ch=")[1] || 0)) || 0, list = ch ? (D.xch[ch] || {m: []}).m : D.chat;
+    if (body) { list.push([++D.cseq, Math.floor(Date.now() / 1000), 1, "Demo Repeater", body.text, null]); return r({ok: true}); }
+    const chans = [[0, "Дом", true, 0x4f, D.chat[D.chat.length - 1][0]]];
+    for (let i = 1; i <= 4; i++) { const x = D.xch[i]; chans.push([i, x ? x.name : "", !!x, x ? 0x11 * i : 0, x && x.m.length ? x.m[x.m.length - 1][0] : 0]); }
+    return r({ch, set: ch ? !!D.xch[ch] : true, queued: 0, qch: 0, name: ch ? (D.xch[ch] || {}).name : "Дом", self: "Demo Repeater", chans, m: list});
   }
   if (p === "/api/watch") return r({w: [["48A1", "Alpha Rep", 6, 70, false], ["DE00", "Echo Rep", 6, 12, false], ["30AA", "Charlie Rep", 12, 50400, true]]});
   if (p === "/api/stats") return r({});
@@ -1409,7 +1464,17 @@ function demo(p, body) {
   }
   if (p === "/api/prefs") return r({name: "Demo Repeater", owner: "demo", lat: 55.7520, lon: 37.6175, freq: 868.918, bw: 62.5, sf: 9, cr: 7, tx: 22, rxgain: 1, repeat: 1, adv_int: 60, fadv_int: 47, fmax: 64, fmax_uns: 64,
     fmax_adv: 8, loop: 0, hash_mode: 0, af: 1.0, rxdelay: 0, txdelay: 0.5, dtxdelay: 0.3, int_thresh: 0, cad: 0, agc: 0, multi_acks: 0, adc_mult: 0, read_only: 0, has_guest: false, regions: "*^ F", region_home: " home is *", wifi_ssid: "DemoWiFi", web_pwd_set: false, mqtt_on: 1, mqtt_host: "192.168.0.10", mqtt_port: 1883, mqtt_user: "repeater", mqtt_int: 60, mqtt_state: "connected", home_set: true, home_name: "Дом", home_rx: 12, home_tx: 5});
-  if (p === "/api/cli") return r({reply: "  -> (демо) " + body.cmd});
+  if (p === "/api/cli") {
+    const a = body.cmd.split(" ");
+    if (a[0] === "chan" && a[1] === "add") {
+      const i = [1, 2, 3, 4].find(k => !D.xch[k]);
+      if (!i) return r({reply: "Err - all 4 channels are used (chan del <N>)"});
+      D.xch[i] = {name: a.slice(3).join(" ") || (a[2][0] === "#" ? a[2] : /^public$/i.test(a[2]) ? "Public" : "Channel"), m: []};
+      return r({reply: "OK - channel " + i + " '" + D.xch[i].name + "' (hash " + (0x11 * i).toString(16).toUpperCase() + ")"});
+    }
+    if (a[0] === "chan" && a[1] === "del") { delete D.xch[+a[2]]; return r({reply: "OK - channel " + a[2] + " removed"}); }
+    return r({reply: "  -> (демо) " + body.cmd});
+  }
   return r({});
 }
 

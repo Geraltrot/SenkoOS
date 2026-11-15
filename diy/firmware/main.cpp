@@ -84,6 +84,7 @@ static void run_command(char* cmd, char* reply, size_t reply_len) {
   if (mqtt_link.handleCommand(cmd, reply, reply_len)) return;
   if (updater.handleCommand(cmd, reply, reply_len)) return;
   if (the_mesh.handleWatchCommand(cmd, reply, reply_len)) return;
+  if (the_mesh.handleChanCommand(cmd, reply, reply_len)) return;
   if (the_mesh.handleHomeCommand(cmd, reply, reply_len)) {
     if (strncmp(cmd, "home channel", 12) == 0) mqtt_link.requestDiscovery();   // add / remove the chat entities in HA
     return;

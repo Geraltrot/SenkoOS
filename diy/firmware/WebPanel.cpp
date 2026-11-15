@@ -792,15 +792,23 @@ void WebPanel::handleUpdateState() {
   j.end();
 }
 
-// channel "Home" in the panel: last messages both ways, and sending
+// panel chat: ?ch=0 "Home" (default), 1..4 extra channels; last messages both ways, and sending
+static int chatChan(const String& s) { int c = s.toInt(); return (c >= 0 && c < DiyMesh::NUM_CH) ? c : 0; }
+
 void WebPanel::handleChat() {
   if (!requireAuth()) return;
+  int c = chatChan(server.arg("ch"));
   JsonOut j(server);
   j.begin();
-  j.f("{\"set\":%s,\"queued\":%d,\"name\":", _mesh->homeChannelSet() ? "true" : "false", _mesh->homeQueued());
-  j.str(_mesh->homeChannelName()).raw(",\"self\":").str(_mesh->getNodePrefs()->node_name).raw(",\"m\":[");
-  for (int i = 0; i < _mesh->chatCount(); i++) {
-    const DiyMesh::ChatMsg& m = _mesh->chatAt(i);
+  j.f("{\"ch\":%d,\"set\":%s,\"queued\":%d,\"qch\":%d,\"name\":", c, _mesh->chanSet(c) ? "true" : "false", _mesh->homeQueued(), _mesh->queuedChan());
+  j.str(_mesh->chanName(c)).raw(",\"self\":").str(_mesh->getNodePrefs()->node_name).raw(",\"chans\":[");
+  for (int i = 0; i < DiyMesh::NUM_CH; i++) {   // [index, name, set, hash, last seq]
+    if (i) j.raw(",");
+    j.f("[%d,", i).str(_mesh->chanName(i)).f(",%s,%u,%lu]", _mesh->chanSet(i) ? "true" : "false", _mesh->chanHash(i), (unsigned long)_mesh->chatLastSeq(i));
+  }
+  j.raw("],\"m\":[");
+  for (int i = 0; i < _mesh->chatCount(c); i++) {
+    const DiyMesh::ChatMsg& m = _mesh->chatAt(c, i);
     if (i) j.raw(",");
     j.f("[%lu,%lu,%u,", (unsigned long)m.seq, (unsigned long)m.ts, m.out).str(m.from).raw(",").str(m.text);
     if (m.out) j.raw(",null]"); else j.f(",%.2f]", m.snr4 / 4.0f);
@@ -814,8 +822,9 @@ void WebPanel::handleChatSend() {
   String t = server.arg("text");
   t.trim();
   if (!t.length()) { sendError(400, "empty message"); return; }
-  if (!_mesh->homeChannelSet()) { sendError(409, "home channel is not set"); return; }
-  if (!_mesh->queueHomeChat(t.c_str())) { sendError(429, "a long message is still being sent"); return; }
+  int c = chatChan(server.arg("ch"));
+  if (!_mesh->chanSet(c)) { sendError(409, c ? "channel is not set" : "home channel is not set"); return; }
+  if (!_mesh->queueChat(c, t.c_str())) { sendError(429, "a long message is still being sent"); return; }
   sendOk("sent");
 }
 

@@ -4,6 +4,18 @@
 // Elements with class "notr" (chat messages, console output) are left as they are.
 // diy/scripts/embed_web.py inlines this file into index.html at build time.
 const EN = [
+  ["Дополнительный канал: только чат в панели, в Home Assistant не передаётся. Хранятся последние 16 сообщений с момента загрузки платы.", "Extra channel: panel chat only, not sent to Home Assistant. The last 16 messages since the board started are kept."],
+  ["До 4 каналов вдобавок к «Дому» — только для чата в панели: в Home Assistant они не передаются, команды и тревоги работают через «Дом». Ключ — как в приложении (hex или base64), #хэштег или public. Каналы #хэштег и Public не приватные: их читает любой, кто знает название.", "Up to 4 channels in addition to \u201cHome\u201d, for the panel chat only: they are not sent to Home Assistant; commands and alarms go through \u201cHome\u201d. Key as in the app (hex or base64), #hashtag or public. #hashtag and Public channels are not private: anyone who knows the name can read them."],
+  ["Введите ключ канала, #хэштег или public", "Enter a channel key, #hashtag or public"],
+  ["ключ, #хэштег или public", "key, #hashtag or public"],
+  ["имя (необязательно)", "name (optional)"],
+  ["Дополнительные каналы", "Extra channels"],
+  ["Добавить канал", "Add channel"],
+  ["удалить канал", "delete channel"],
+  ["Удалить канал", "Delete channel"],
+  ["с платы?", "from the board?"],
+  ["новые сообщения", "new messages"],
+  ["Канал не задан", "Channel is not set"],
   // ---- shell, login, header
   ["Лаборатория ретранслятора", "Repeater lab"], ["лаборатория ретранслятора", "repeater lab"], ["лаборатория", "lab"],
   ["Доступ только для администратора", "Administrator access only"], ["Войти", "Log in"], ["выйти", "log out"],
