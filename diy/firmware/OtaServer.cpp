@@ -24,14 +24,14 @@ static char s_err[64];
 static uint32_t s_last_activity = 0;
 static bool s_first_chunk = false;
 
-// The upload must be an application image (<tag>.bin) for a classic ESP32:
-// esp_image_header_t starts with magic 0xE9, chip_id is at bytes 12..13 (0 = ESP32).
+// The upload must be an application image (<tag>.bin) for this chip:
+// esp_image_header_t starts with magic 0xE9, chip_id is at bytes 12..13 (DIY_IMAGE_CHIP_ID).
 // A <tag>-merged.bin starts with 0xFF padding before the bootloader, so it is rejected here.
 static const char* checkImageHeader(const uint8_t* b, size_t n) {
   if (n < 16) return "file too short";
   if (b[0] == 0xFF) return "merged.bin: flash it over USB at 0x0, OTA needs <tag>.bin";
   if (b[0] != 0xE9) return "not an ESP32 application image";
-  if ((b[12] | (b[13] << 8)) != 0) return "image is for another chip, not ESP32";
+  if ((b[12] | (b[13] << 8)) != DIY_IMAGE_CHIP_ID) return "image is for another chip";
   return nullptr;
 }
 

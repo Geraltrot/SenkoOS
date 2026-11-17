@@ -436,7 +436,7 @@ function errRu(m) {
   const w = /^too many attempts, wait (\d+) s/.exec(m || ""); if (w) return "Слишком много попыток, подождите " + w[1] + " с";
   return ({"wrong password": "Неверный пароль", "token is wrong or expired": "Токен загрузки неверен или истёк — начните заново",
     "merged.bin: flash it over USB at 0x0, OTA needs <tag>.bin": "Это -merged.bin: его прошивают по USB на адрес 0x0. Для обновления нужен файл <тег>.bin",
-    "not an ESP32 application image": "Это не файл прошивки ESP32", "image is for another chip, not ESP32": "Прошивка для другого чипа, не ESP32",
+    "not an ESP32 application image": "Это не файл прошивки ESP32", "image is for another chip": "Прошивка для другого чипа (другая плата)",
     "file too short": "Файл слишком короткий", "empty file": "Пустой файл",
     "new admin password required": "Задайте новый пароль администратора", "admin password: 6-15 characters": "Пароль: от 6 до 15 символов",
     "admin password must not be the factory one": "Нужен свой пароль, не заводской", "name: at most 31 characters": "Имя: не длиннее 31 символа",
@@ -683,12 +683,19 @@ function renderOverview() {
     tile(9, "Ad", "Объявить", "advert", "без ретрансляции — слышат только соседи; с ретрансляцией — вся сеть", "var(--acc2)",
       '<div class="btns" style="flex-wrap:wrap"><button class="q" data-adv="advert.zerohop">без ретрансляции</button><button class="q" data-adv="advert">с ретрансляцией</button></div>'),
   ];
+  // battery (boards with a divider, e.g. Heltec): voltage and a rough Li-ion charge 3.3 … 4.2 V
+  if (s.batt_mv) {
+    const v = s.batt_mv / 1000, pct = Math.max(0, Math.min(100, Math.round((v - 3.3) / 0.9 * 100)));
+    tiles.push(tile(10, "Bt", v.toFixed(2) + " В", "батарея", "≈ " + pct + " % · Li-ion 3,3 … 4,2 В", pct < 20 ? "var(--bad)" : "var(--ok)",
+      '<div class="meter" style="--c:' + (pct < 20 ? "var(--bad)" : "var(--ok)") + '"><i style="width:' + pct + '%"></i></div>'));
+  }
+  const z0 = s.batt_mv ? 11 : 10;
   // I2C sensors found by the board (BMP/BME280, AHT, SHT, INA, ...): one tile per sensor channel
   const byCh = {};
   (s.sensors || []).forEach(([ch, name, v, unit]) => (byCh[ch] = byCh[ch] || []).push([name, v, unit]));
   Object.keys(byCh).forEach((ch, i) => {
     const vals = byCh[ch], main = vals[0];
-    tiles.push(tile(10 + i, "Se", (+main[1]).toFixed(1) + " " + esc(main[2]), "датчик " + ch + ": " + esc(main[0]),
+    tiles.push(tile(z0 + i, "Se", (+main[1]).toFixed(1) + " " + esc(main[2]), "датчик " + ch + ": " + esc(main[0]),
       vals.slice(1).map(([n, v, u]) => esc(n) + " " + (+v).toFixed(1) + " " + esc(u)).join(" · ") || "—", "var(--ok)"));
   });
   $("tiles").innerHTML = tiles.join("");
@@ -1183,7 +1190,7 @@ const SETTINGS = [
   ["Узел", [F("Имя", "name", v => "set name " + v), F("Широта", "lat", v => "set lat " + v), F("Долгота", "lon", v => "set lon " + v), F("Владелец", "owner", v => "set owner.info " + v),
     F("Пароль администратора", "_admin", v => "password " + v, "только запись; это же пароль входа в панель, если не задан отдельный", {type: "password"}),
     F("Гостевой пароль", "_guest", v => "set guest.password " + v, "только запись; пусто — гостевой вход выключен", {type: "password"})]],
-  ["Радио", [F("Частота / BW / SF / CR", "_radio", null, "применится после перезагрузки"), F("Мощность TX, dBm", "tx", v => "set tx " + v, "не больше 22: E22 сам усиливает до ~30 dBm"),
+  ["Радио", [F("Частота / BW / SF / CR", "_radio", null, "применится после перезагрузки"), F("Мощность TX, dBm", "tx", v => "set tx " + v, "мощность чипа SX1262, не больше 22; на антенне больше за счёт усилителя платы: SenkoPhone (E22) до ~30 dBm, Heltec V4 до ~28 dBm, у Heltec V3 усилителя нет"),
     F("Усиленный приём", "rxgain", v => "set radio.rxgain " + v, "", {sel: [["on", "вкл"], ["off", "выкл"]], map: v => v ? "on" : "off"})]],
   ["Пересылка", [F("Пересылать пакеты", "repeat", v => "set repeat " + v, "", {sel: [["on", "вкл"], ["off", "выкл"]], map: v => v ? "on" : "off"}),
     F("Объявление, мин", "adv_int", v => "set advert.interval " + v, "0 — выкл, иначе 60–240"), F("Объявление по сети, ч", "fadv_int", v => "set flood.advert.interval " + v),
@@ -1364,7 +1371,7 @@ $("fwBtn").onclick = async () => {
   // same header check as the board (OtaServer checkImageHeader), by content, not by name
   const hd = new Uint8Array(await f.slice(0, 16).arrayBuffer());
   const bad = hd.length < 16 ? "file too short" : hd[0] === 0xFF ? "merged.bin: flash it over USB at 0x0, OTA needs <tag>.bin"
-    : hd[0] !== 0xE9 ? "not an ESP32 application image" : (hd[12] | (hd[13] << 8)) !== 0 ? "image is for another chip, not ESP32" : "";
+    : hd[0] !== 0xE9 ? "not an ESP32 application image" : (hd[12] | (hd[13] << 8)) !== (status.chip_id || 0) ? "image is for another chip" : "";
   if (bad) { toast(errRu(bad), true); $("fwNote").textContent = "Ошибка: " + errRu(bad); return; }
   if (!confirm("Записать " + f.name + " (" + kb(f.size) + ") и перезагрузить репитер?")) return;
   if (DEMO) { toast("Демо: загрузка не выполняется"); return; }
@@ -1398,11 +1405,13 @@ function demo(p, body) {
   const up = 7 * 3600 + Math.floor((Date.now() - D.t0) / 1000), rnd = (a, b) => a + Math.random() * (b - a);
   const r = x => Promise.resolve(x);
   if (p === "/api/login" || p === "/api/logout" || p === "/api/webpass" || p === "/api/reboot") return r({ok: true});
-  if (p === "/api/status") return r({name: "Demo Repeater", firmware: "v1.18.0", build: "15 Oct 2026", diy_version: "v1.3.2-e22wroom-mc1.18.0-20261114", diy_build: "2026-11-14", diy_channel: "release", reset_reason: "software", board: "SenkoPhone 1.0", sensors: [[2, "температура", 21.4, "°C"], [2, "давление", 1004.6, "hPa"], [2, "высота", 72, "m"]], public_key: "E6D3A0B1C2D3E4F5061728394A5B6C7D8E9FA0B1C2D3E4F5061728394A5B6C7D",
+  if (p === "/api/status") return r({name: "Demo Repeater", firmware: "v1.18.0", build: "15 Oct 2026", diy_version: "v1.4.0-mc1.18.0-20261120", diy_build: "2026-11-14", diy_channel: "release", reset_reason: "software", board: "SenkoPhone 1.0", sensors: [[2, "температура", 21.4, "°C"], [2, "давление", 1004.6, "hPa"], [2, "высота", 72, "m"]], public_key: "E6D3A0B1C2D3E4F5061728394A5B6C7D8E9FA0B1C2D3E4F5061728394A5B6C7D",
     uptime_secs: up, lat: 55.7520, lon: 37.6175, clock: Math.floor(Date.now() / 1000), clock_ok: true, radio: {freq: 868.918, bw: 62.5, sf: 9, cr: 7, tx_dbm: 22, rx_boost: true}, repeat: true, advert_interval_min: 60, flood_advert_h: 47,
     wifi: {ssid: "DemoWiFi", ip: "192.168.0.50", rssi: -61}, heap: {free: 128000, min_free: 109000, max_block: 77000}, noise_floor: -114,
     nf_recent: Array.from({length: 60}, (_, i) => -115 + Math.round(Math.sin(i / 5) * 2 + rnd(-1, 1))), last_rx: {snr: -9.3, rssi: -123, ago: 12, hops: 3, type: 8, from: "DA"},
-    air24: {tx_ms: 160000, rx_ms: 520000, span_s: 25200}, air_total: {tx_ms: 160000, rx_ms: 520000}});
+    air24: {tx_ms: 160000, rx_ms: 520000, span_s: 25200}, air_total: {tx_ms: 160000, rx_ms: 520000},
+    // ?heltec in the address: Heltec V4 sample (battery tile, ESP32-S3 firmware check)
+    ...(/heltec/.test(location.search) ? {board: "Heltec V4", board_id: "heltec_v4", chip_id: 9, batt_mv: 3870, diy_version: "v1.4.0-mc1.18.0-20261120"} : {board_id: "e22wroom", chip_id: 0})});
   if (p === "/api/setup") return body ? r({ok: true, reboot: !!body.freq, wifi: !!body.ssid})
     : r({via_ap: location.hash === "#setup", open: true, need_password: location.hash === "#setup", board: "SenkoPhone 1.0", name: "SenkoPhone", lat: 0, lon: 0,
         radio: {freq: 868.918, bw: 62.5, sf: 9, cr: 7}, wifi_ssid: ""});

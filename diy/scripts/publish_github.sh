@@ -7,7 +7,7 @@
 #
 # env: GH_TOKEN (fine-grained token, Contents: read and write, only this repo), GH_REPO (owner/name),
 #      PATTERNS (= PRIVACY_PATTERNS), TAG, PRERELEASE (true|false), RELEASE_TITLE, RELEASE_BODY,
-#      BUILD_DIR (.pio/build/<env>)
+#      OUT_DIR (firmware of every board <tag>-<board>[-merged].bin and the signed manifest*.json/.sig)
 set -eu
 
 if [ -z "${GH_TOKEN:-}" ] || [ -z "${GH_REPO:-}" ]; then
@@ -55,12 +55,12 @@ if [ -f diy/github/README.md ]; then
 fi
 tree=$(git write-tree)
 rm -f "$GIT_INDEX_FILE"; unset GIT_INDEX_FILE
-msg=$(printf 'SenkoOS %s\n\nMeshCore repeater + SenkoPhone board (ESP32 WROOM-32 + E22-900M30S).\nhttps://github.com/meshcore-dev/MeshCore' "$TAG")
+msg=$(printf 'SenkoOS %s\n\nMeshCore repeater with a web panel: SenkoPhone (ESP32 WROOM-32 + E22-900M30S), Heltec WiFi LoRa 32 V3 / V4.\nhttps://github.com/meshcore-dev/MeshCore' "$TAG")
 commit=$(echo "$msg" | git commit-tree "$tree" $parent)
 gitgh push --quiet "$remote" "$commit:refs/heads/main" "$commit:refs/tags/$TAG"
 echo "pushed $commit as main and $TAG"
 
-# 3. GitHub release with the firmware files and the update manifest
+# 3. GitHub release with the firmware files of every board and the update manifests
 api="https://api.github.com/repos/${GH_REPO}"
 hdr_auth="Authorization: Bearer $GH_TOKEN"
 body=$(python3 -c 'import json,os; print(json.dumps({"tag_name": os.environ["TAG"], "name": os.environ.get("RELEASE_TITLE") or os.environ["TAG"], "body": os.environ.get("RELEASE_BODY",""), "prerelease": os.environ.get("PRERELEASE")=="true"}))')
@@ -72,24 +72,24 @@ upload() {
   curl -fsS -X POST -H "$hdr_auth" -H "Content-Type: application/octet-stream" --data-binary "@$1" "$up?name=$2" >/dev/null
   echo "uploaded $2"
 }
-upload "$BUILD_DIR/firmware.bin" "$TAG.bin"
-upload "$BUILD_DIR/firmware-merged.bin" "$TAG-merged.bin"
-upload manifest.json manifest.json
-upload manifest.sig manifest.sig
+for f in "$OUT_DIR"/*.bin "$OUT_DIR"/manifest*.json "$OUT_DIR"/manifest*.sig; do
+  upload "$f" "${f##*/}"
+done
 echo "GitHub release $TAG done"
 
-# 4. rolling pre-release "beta-channel": the manifest of the newest release of ANY kind, for boards
+# 4. rolling pre-release "beta-channel": the manifests of the newest release of ANY kind, for boards
 #    with "update beta on" (GitHub's latest/download skips pre-releases)
-if [ -f manifest.json ] && [ -f manifest.sig ]; then
+if [ -f "$OUT_DIR/manifest.json" ] && [ -f "$OUT_DIR/manifest.sig" ]; then
   if ch=$(curl -fsS -H "$hdr_auth" -H "Accept: application/vnd.github+json" "$api/releases/tags/beta-channel" 2>/dev/null); then :; else
     ch=$(curl -fsS -X POST -H "$hdr_auth" -H "Accept: application/vnd.github+json" "$api/releases"       -d '{"tag_name":"beta-channel","target_commitish":"main","name":"beta-channel (update manifest)","body":"Manifest of the newest release, beta included. Used by boards with: update beta on","prerelease":true}')
   fi
   ch_id=$(printf '%s' "$ch" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-  # replace the old manifest files
-  printf '%s' "$ch" | python3 -c 'import json,sys; [print(a["id"]) for a in json.load(sys.stdin).get("assets",[]) if a["name"] in ("manifest.json","manifest.sig")]' |
+  # replace the old manifest files (manifest.json/.sig and manifest-<board>.json/.sig)
+  printf '%s' "$ch" | python3 -c 'import json,sys; [print(a["id"]) for a in json.load(sys.stdin).get("assets",[]) if a["name"].startswith("manifest")]' |
     while read -r aid; do curl -fsS -X DELETE -H "$hdr_auth" "$api/releases/assets/$aid"; done
   up="https://uploads.github.com/repos/${GH_REPO}/releases/${ch_id}/assets"
-  upload manifest.json manifest.json
-  upload manifest.sig manifest.sig
-  echo "beta-channel manifest -> $TAG"
+  for f in "$OUT_DIR"/manifest*.json "$OUT_DIR"/manifest*.sig; do
+    upload "$f" "${f##*/}"
+  done
+  echo "beta-channel manifests -> $TAG"
 fi

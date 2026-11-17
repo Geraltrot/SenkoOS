@@ -235,6 +235,9 @@ static const SensorDef SENSORS[] = {
   {"wifi_rssi", "Сигнал Wi-Fi",           "dBm",     "signal_strength", "measurement",      true,  nullptr},
   {"heap",      "Свободная память",       "kB",      "data_size",       "measurement",      true,  nullptr},
   {"reset",     "Причина перезагрузки",   nullptr,   nullptr,           nullptr,            true,  "mdi:restart"},
+#ifdef DIY_HAS_BATTERY
+  {"batt",      "Напряжение батареи",     "V",       "voltage",         "measurement",      false, nullptr},
+#endif
 };
 
 // JSON string: escape quotes and backslashes (names come from user settings)
@@ -443,17 +446,23 @@ void MqttLink::publishState() {
   char last[64] = "\"last_snr\":null,\"last_rssi\":null";
   if (const DiyMesh::PktEntry* e = _mesh->lastRx()) snprintf(last, sizeof(last), "\"last_snr\":%.2f,\"last_rssi\":%d", e->snr4 / 4.0f, e->rssi);
 
+  char batt[24] = "";   // boards with a battery divider (Heltec): volts, null until the first reading
+#ifdef DIY_HAS_BATTERY
+  if (uint16_t mv = diyBattMilliVolts()) snprintf(batt, sizeof(batt), ",\"batt\":%.2f", mv / 1000.0f);
+  else snprintf(batt, sizeof(batt), ",\"batt\":null");
+#endif
+
   char topic[48], payload[512];
   snprintf(topic, sizeof(topic), "%s/state", _topic_base);
   snprintf(payload, sizeof(payload),
            "{\"rx_total\":%lu,\"tx_total\":%lu,\"rx_min\":%u,\"tx_min\":%u,\"noise\":%d,%s,"
            "\"air_tx\":%s,\"air_rx\":%s,\"nodes\":%d,\"direct\":%d,\"blocked\":%lu,"
-           "\"uptime\":%lu,\"wifi_rssi\":%d,\"heap\":%lu,\"reset\":\"%s\"}",
+           "\"uptime\":%lu,\"wifi_rssi\":%d,\"heap\":%lu,\"reset\":\"%s\"%s}",
            (unsigned long)(_mesh->rx_flood + _mesh->rx_direct), (unsigned long)(_mesh->tx_flood + _mesh->tx_direct),
            m.valid ? m.rx : 0, m.valid ? m.tx : 0, _mesh->noiseFloor(), last,
            n24 ? String(tx24 * 100.0f / span, 2).c_str() : "null", n24 ? String(rx24 * 100.0f / span, 2).c_str() : "null",
            _mesh->num_nodes, direct, (unsigned long)_mesh->blocked_count,
-           (unsigned long)(millis() / 1000), _wifi ? _wifi->rssi() : 0, (unsigned long)(ESP.getFreeHeap() / 1024), diyResetReason());
+           (unsigned long)(millis() / 1000), _wifi ? _wifi->rssi() : 0, (unsigned long)(ESP.getFreeHeap() / 1024), diyResetReason(), batt);
   publish(topic, payload, true);
 }
 

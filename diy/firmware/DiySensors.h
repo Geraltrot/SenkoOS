@@ -17,3 +17,6 @@ struct DiySensorValue {
 
 // fills out[] with the current readings, returns how many
 int diyReadSensors(DiySensorValue out[], int max);
+
+// battery voltage in mV, read at most every 30 s; 0 = this board does not measure it (no DIY_HAS_BATTERY)
+uint16_t diyBattMilliVolts();

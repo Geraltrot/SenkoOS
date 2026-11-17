@@ -26,12 +26,19 @@ class DiyUITask {
   unsigned long _started_at = 0;
 
   uint8_t _page = 0;
-  static const int PAGES = 3;   // main, radio, system
+  // 128x128 (SenkoPhone): main, radio, system. 128x64 (Heltec): the system page is split in two.
+  bool _small = false;          // display height < 100
+  uint8_t _pages = 3;
 
   void renderCurrScreen();
   void renderMain(char* tmp, size_t sz);
   void renderRadio(char* tmp, size_t sz);
   void renderSystem(char* tmp, size_t sz);
+  void renderSmallMain(char* tmp, size_t sz);
+  void renderSmallRadio(char* tmp, size_t sz);
+  void renderSmallSystem(char* tmp, size_t sz);
+  void renderSmallInfo(char* tmp, size_t sz);
+  int lastRxText(char* tmp, size_t sz);
   void drawHeader(const char* title);
   void drawWifiBars(int x, int y);
   void drawPageDots();

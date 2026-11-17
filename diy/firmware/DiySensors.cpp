@@ -28,6 +28,7 @@ static const LppType TYPES[] = {
   {LPP_CONCENTRATION,       2, 1.0f,   false, "концентрация", "ppm", nullptr},
   {LPP_ANALOG_INPUT,        2, 0.01f,  true,  "аналоговый вход", nullptr, nullptr},
   {LPP_GENERIC_SENSOR,      4, 1.0f,   false, "значение",     nullptr, nullptr},
+  {LPP_GPS,                 9, 1.0f,   false, nullptr,        nullptr, nullptr},   // GPS module (Heltec): skipped
 };
 
 int diyReadSensors(DiySensorValue out[], int max) {
@@ -42,6 +43,7 @@ int diyReadSensors(DiySensorValue out[], int max) {
     for (const LppType& x : TYPES) if (x.type == type) { t = &x; break; }
     if (!t) break;   // unknown size: cannot continue safely
     if (i + 2 + t->size > len) break;
+    if (!t->name) { i += 2 + t->size; continue; }   // known size, not a sensor value
     uint32_t raw = 0;
     for (int k = 0; k < t->size; k++) raw = (raw << 8) | b[i + 2 + k];
     float v;
@@ -59,4 +61,18 @@ int diyReadSensors(DiySensorValue out[], int max) {
     i += 2 + t->size;
   }
   return n;
+}
+
+uint16_t diyBattMilliVolts() {
+#ifdef DIY_HAS_BATTERY
+  static uint16_t mv = 0;
+  static uint32_t at = 0;
+  if (at == 0 || millis() - at > 30000) {   // the board switches the ADC divider on for each read
+    mv = board.getBattMilliVolts();
+    at = millis() | 1;
+  }
+  return mv;
+#else
+  return 0;
+#endif
 }

@@ -12,7 +12,13 @@ jobs:
   build:
     runs-on: self-hosted
     env:
-      PIO_ENV: DIY_E22_WROOM32_repeater
+      # "<PlatformIO env>:<board id>" for every board of a release (board id = DIY_BOARD_ID).
+      # Files: <tag>-<board>.bin (OTA) and <tag>-<board>-merged.bin (USB, 0x0).
+      # Update manifests: manifest.json for e22wroom (boards up to v1.3.x read it), manifest-<board>.json otherwise.
+      BOARDS: >-
+        DIY_E22_WROOM32_repeater:e22wroom
+        SenkoOS_heltec_v3_repeater:heltec_v3
+        SenkoOS_heltec_v4_repeater:heltec_v4
       # release builds carry the tag as DIY_VERSION; other builds use git describe
       DIY_VERSION: ${{ github.event_name == 'release' && github.ref_name || '' }}
       # release channel shown in the panel: published release, pre-release (beta) or anything else (dev)
@@ -30,49 +36,50 @@ jobs:
           PATTERNS: ${{ vars.PRIVACY_PATTERNS }}
         run: |
           if [ -z "$PATTERNS" ]; then echo "::warning::PRIVACY_PATTERNS is not set, privacy check skipped"; exit 0; fi
-          hits=$(grep -rnIiE -- "$PATTERNS" diy/firmware variants/diy_e22_wroom32 | cut -d: -f1,2 || true)
+          hits=$(grep -rnIiE -- "$PATTERNS" diy/firmware variants/diy_e22_wroom32 variants/senkoos_heltec | cut -d: -f1,2 || true)
           if [ -n "$hits" ]; then echo "Personal data found at:"; echo "$hits"; exit 1; fi
           echo "privacy check: ok"
 
       - name: Versions
         run: pio --version && git --version
 
-      - name: Build firmware.bin
-        run: pio run -e "$PIO_ENV"
-
-      - name: Build firmware-merged.bin
-        run: pio run -e "$PIO_ENV" -t mergebin
-
-      - name: Check outputs
+      # every board: firmware.bin + firmware-merged.bin, copied to out/ as <tag>-<board>[-merged].bin
+      # (builds that are not a release: build-<board>[-merged].bin)
+      - name: Build firmware
+        env:
+          TAG: ${{ github.event_name == 'release' && github.ref_name || 'build' }}
         run: |
-          cd ".pio/build/$PIO_ENV"
-          ls -la firmware.bin firmware-merged.bin
-          sha256sum firmware.bin firmware-merged.bin
+          rm -rf out && mkdir out
+          for pair in $BOARDS; do
+            penv="${pair%%:*}"; board="${pair#*:}"
+            pio run -e "$penv"
+            pio run -e "$penv" -t mergebin
+            cp ".pio/build/$penv/firmware.bin" "out/$TAG-$board.bin"
+            cp ".pio/build/$penv/firmware-merged.bin" "out/$TAG-$board-merged.bin"
+          done
+          ls -la out
+          (cd out && sha256sum *.bin)
 
       - uses: https://data.forgejo.org/actions/upload-artifact@v3
         with:
           name: firmware-${{ github.sha }}
-          path: |
-            .pio/build/DIY_E22_WROOM32_repeater/firmware.bin
-            .pio/build/DIY_E22_WROOM32_repeater/firmware-merged.bin
+          path: out/*.bin
 
       - name: Attach to release
         if: github.event_name == 'release'
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: |
-          # firmware.bin -> <tag>.bin, firmware-merged.bin -> <tag>-merged.bin
-          for pair in "firmware.bin:$TAG.bin" "firmware-merged.bin:$TAG-merged.bin"; do
-            src="${pair%%:*}"; name="${pair#*:}"
+          for f in out/*.bin; do
+            name="${f#out/}"
             curl -fsS -X POST -H "Authorization: token $TOKEN" \
-              -F "attachment=@.pio/build/$PIO_ENV/$src" \
+              -F "attachment=@$f" \
               "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/${{ github.event.release.id }}/assets?name=$name"
           done
 
-      # Auto-update manifest (diy/firmware/Updater.cpp): manifest.json + manifest.sig (Ed25519).
+      # Auto-update manifests (diy/firmware/Updater.cpp), one per board: <name>.json + <name>.sig (Ed25519).
       # Secret UPDATE_SIGNING_KEY = PEM of the signing key; variable UPDATE_URL_BASE = where the
-      # board downloads <tag>/<tag>.bin (GitHub: https://github.com/OWNER/REPO/releases/download).
+      # board downloads <tag>/<tag>-<board>.bin (GitHub: https://github.com/OWNER/REPO/releases/download).
       # Without the secret the step only warns: such releases are not offered to boards.
       - name: Update manifest
         if: github.event_name == 'release'
@@ -87,22 +94,28 @@ jobs:
             echo "::warning::UPDATE_SIGNING_KEY or UPDATE_URL_BASE is not set: no update manifest for this release"
             exit 0
           fi
-          python3 diy/scripts/make_manifest.py --tag "$TAG" --bin ".pio/build/$PIO_ENV/firmware.bin" \
-            --board e22wroom --channel "$CHANNEL" --url-base "$URL_BASE" --out manifest.json
           umask 077
           key=$(mktemp); printf '%s\n' "$SIGNING_KEY" > "$key"
-          openssl pkeyutl -sign -inkey "$key" -rawin -in manifest.json -out manifest.sig.bin
+          for pair in $BOARDS; do
+            board="${pair#*:}"
+            if [ "$board" = e22wroom ]; then m=manifest; else m="manifest-$board"; fi
+            python3 diy/scripts/make_manifest.py --tag "$TAG" --bin "out/$TAG-$board.bin" \
+              --board "$board" --channel "$CHANNEL" --url-base "$URL_BASE" --out "out/$m.json"
+            openssl pkeyutl -sign -inkey "$key" -rawin -in "out/$m.json" -out "out/$m.sig.bin"
+            od -An -tx1 -v "out/$m.sig.bin" | tr -d ' \n' > "out/$m.sig"
+            rm -f "out/$m.sig.bin"
+            test "$(wc -c < "out/$m.sig")" -eq 128
+          done
           rm -f "$key"
-          od -An -tx1 -v manifest.sig.bin | tr -d ' \n' > manifest.sig
-          test "$(wc -c < manifest.sig)" -eq 128
-          for f in manifest.json manifest.sig; do
+          for f in out/manifest*.json out/manifest*.sig; do
+            name="${f#out/}"
             curl -fsS -X POST -H "Authorization: token $TOKEN" -F "attachment=@$f" \
-              "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/${{ github.event.release.id }}/assets?name=$f"
+              "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/${{ github.event.release.id }}/assets?name=$name"
           done
 
       # Public copy on GitHub (diy/scripts/publish_github.sh): one clean commit per release + GitHub
-      # release with the firmware and the update manifest; the whole tree is checked against
-      # PRIVACY_PATTERNS first. Secret GH_TOKEN (fine-grained, Contents RW, only that repo),
+      # release with the firmware of every board and the update manifests; the whole tree is checked
+      # against PRIVACY_PATTERNS first. Secret GH_TOKEN (fine-grained, Contents RW, only that repo),
       # variable GH_REPO (owner/name). Without them the step only warns.
       - name: Publish to GitHub
         if: github.event_name == 'release'
@@ -114,5 +127,5 @@ jobs:
           PRERELEASE: ${{ github.event.release.prerelease && 'true' || 'false' }}
           RELEASE_TITLE: ${{ github.event.release.name }}
           RELEASE_BODY: ${{ github.event.release.body }}
-          BUILD_DIR: .pio/build/${{ env.PIO_ENV }}
+          OUT_DIR: out
         run: sh diy/scripts/publish_github.sh

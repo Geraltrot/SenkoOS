@@ -11,6 +11,9 @@
 #ifndef DIY_BOARD_NAME
   #define DIY_BOARD_NAME "DIY board"
 #endif
+#ifndef DIY_BOARD_ID
+  #define DIY_BOARD_ID "e22wroom"
+#endif
 #ifndef ADMIN_PASSWORD
   #define ADMIN_PASSWORD "password"
 #endif
@@ -247,6 +250,9 @@ void WebPanel::handleStatus() {
   j.raw(",\"diy_channel\":").str(DIY_CHANNEL);
   j.raw(",\"reset_reason\":").str(diyResetReason());
   j.raw(",\"board\":").str(DIY_BOARD_NAME);
+  j.raw(",\"board_id\":").str(DIY_BOARD_ID);
+  j.f(",\"chip_id\":%d", DIY_IMAGE_CHIP_ID);   // the panel checks a firmware file against it before upload
+  if (uint16_t mv = diyBattMilliVolts()) j.f(",\"batt_mv\":%u", (unsigned)mv);
   {   // I2C sensors: [[channel, "name", value, "unit"], ...]
     DiySensorValue v[16];
     int n = diyReadSensors(v, 16);

@@ -145,7 +145,7 @@ const EN = [
   ["Карта недоступна (нет интернета у браузера). Вставьте координаты в поле выше.", "The map is unavailable (no internet in the browser). Paste the coordinates above."],
   ["Координаты вне диапазона", "Coordinates out of range"], ["Браузер не дал положение", "The browser did not give a position"],
   ["Радио", "Radio"], ["Частота / BW / SF / CR", "Frequency / BW / SF / CR"], ["применится после перезагрузки", "applies after a reboot"],
-  ["МГц", "MHz"], ["BW кГц", "BW kHz"], ["Мощность TX, dBm", "TX power, dBm"], ["не больше 22: E22 сам усиливает до ~30 dBm", "22 at most: the E22 amplifies to ~30 dBm itself"],
+  ["МГц", "MHz"], ["BW кГц", "BW kHz"], ["Мощность TX, dBm", "TX power, dBm"], ["мощность чипа SX1262, не больше 22; на антенне больше за счёт усилителя платы: SenkoPhone (E22) до ~30 dBm, Heltec V4 до ~28 dBm, у Heltec V3 усилителя нет", "SX1262 chip power, 22 at most; the board amplifier adds to it at the antenna: SenkoPhone (E22) up to ~30 dBm, Heltec V4 up to ~28 dBm, Heltec V3 has no amplifier"],
   ["Усиленный приём", "Boosted RX gain"], ["вкл", "on"], ["выкл", "off"],
   ["Пересылка", "Forwarding"], ["Пересылать пакеты", "Forward packets"], ["Объявление, мин", "Advert, min"], ["0 — выкл, иначе 60–240", "0 — off, otherwise 60–240"],
   ["Объявление по сети, ч", "Flood advert, h"], ["Flood max, хопов", "Flood max, hops"], ["Flood max без региона", "Flood max without region"],
@@ -207,7 +207,7 @@ const EN = [
   ["Готово, репитер перезагружается. Обновите страницу через 20 секунд.", "Done, the repeater is rebooting. Reload the page in 20 seconds."],
   ["Связь прервалась", "Connection lost"], ["Демо: загрузка не выполняется", "Demo: nothing is uploaded"],
   ["Это -merged.bin: его прошивают по USB на адрес 0x0. Для обновления нужен файл <тег>.bin", "This is a -merged.bin: flash it over USB at 0x0. An update needs the <tag>.bin file"],
-  ["Это не файл прошивки ESP32", "This is not an ESP32 firmware file"], ["Прошивка для другого чипа, не ESP32", "Firmware for another chip, not ESP32"],
+  ["Это не файл прошивки ESP32", "This is not an ESP32 firmware file"], ["Прошивка для другого чипа (другая плата)", "Firmware for another chip (another board)"], ["батарея", "battery"],
   ["Файл слишком короткий", "File too short"], ["Пустой файл", "Empty file"], ["Токен загрузки неверен или истёк — начните заново", "Upload token wrong or expired — start again"],
   ["Перезагрузка", "Reboot"], ["Перезагрузить репитер", "Reboot the repeater"], ["Перезагрузить репитер?", "Reboot the repeater?"],
   ["Перезагрузка… обновите страницу через 15 секунд", "Rebooting… reload the page in 15 seconds"], ["Мастер настройки", "Setup wizard"],
@@ -246,7 +246,7 @@ const EN = [
 const EN_UNITS = [
   [/(\d) д(?![А-Яа-яЁё])/g, "$1 d"], [/(\d) ч(?![А-Яа-яЁё])/g, "$1 h"], [/(\d) с(?![А-Яа-яЁё])/g, "$1 s"],
   [/(\d)д(?![А-Яа-яЁё])/g, "$1d"], [/(\d)ч(?![А-Яа-яЁё])/g, "$1h"], [/(\d)м(?![А-Яа-яЁё])/g, "$1m"], [/(\d)с(?![А-Яа-яЁё])/g, "$1s"],
-  [/(\d) м(?![А-Яа-яЁё])/g, "$1 m"],
+  [/(\d) м(?![А-Яа-яЁё])/g, "$1 m"], [/(\d) В(?![А-Яа-яЁё])/g, "$1 V"],
 ];
 
 let LANG = "ru";

@@ -10,9 +10,12 @@ void setUpdaterClock(uint32_t (*now_epoch)());
 // Firmware auto-update from published releases (GitHub).
 //
 // The board reads a small manifest next to the release files:
-//   manifest.json  {"version":"v1.4.0-e22wroom-mc1.18.0-20261120","board":"e22wroom","channel":"release",
-//                   "url":"https://.../v1.4.0-...bin","size":1234567,"sha256":"<64 hex>"}
+//   manifest.json  {"version":"v1.4.0-mc1.18.0-20261120","board":"e22wroom","channel":"release",
+//                   "url":"https://.../v1.4.0-mc1.18.0-20261120-e22wroom.bin","size":1234567,"sha256":"<64 hex>"}
 //   manifest.sig   Ed25519 signature of manifest.json, 128 hex chars
+// One manifest per board in the same release: manifest.json (SenkoPhone, e22wroom; boards up to v1.3.x
+// read it), manifest-heltec_v3.json, manifest-heltec_v4.json. A board takes only a manifest whose
+// "board" equals its DIY_BOARD_ID and an image for its own chip.
 // The signature is checked with the public key built into the firmware (DIY_UPDATE_PUBKEY),
 // so a release is accepted only if it was signed by our CI; TLS certificates are not needed
 // for that. The image is written to the other OTA slot while its SHA-256 is computed, and the

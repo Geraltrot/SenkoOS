@@ -72,16 +72,16 @@ static bool jsonField(const char* json, const char* key, char* out, size_t n) {
   return o > 0;
 }
 
-// "v1.4.0-e22wroom-..." -> 1004000; anything else (dev builds: "876d6bf") -> 0
+// "v1.4.0-mc1.18.0-..." (or the old "v1.3.6-e22wroom-...") -> 1004000; anything else (dev builds: "876d6bf") -> 0
 static long versionNum(const char* v) {
   int a = 0, b = 0, c = 0;
   if (!v || v[0] != 'v' || sscanf(v + 1, "%d.%d.%d", &a, &b, &c) != 3) return 0;
   return (long)a * 1000000L + (long)b * 1000L + c;
 }
 
-// same rule as the OTA upload: application image (0xE9) for a classic ESP32 (chip id 0)
+// same rule as the OTA upload: application image (0xE9) for this chip (OtaServer.h)
 static bool imageHeaderOk(const uint8_t* b, size_t n) {
-  return n >= 16 && b[0] == 0xE9 && (b[12] | (b[13] << 8)) == 0;
+  return n >= 16 && b[0] == 0xE9 && (b[12] | (b[13] << 8)) == DIY_IMAGE_CHIP_ID;
 }
 
 // ---------------------------------------------------------------------------
