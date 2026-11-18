@@ -10,6 +10,7 @@
 #include "MqttLink.h"
 #include "Updater.h"
 #include "DiySensors.h"
+#include "LanBridge.h"
 #include <time.h>
 #include <Preferences.h>
 #include <diy_version.h>
@@ -82,6 +83,7 @@ static void run_command(char* cmd, char* reply, size_t reply_len) {
   }
   if (wifi_link.handleCommand(cmd, reply, reply_len)) return;
   if (mqtt_link.handleCommand(cmd, reply, reply_len)) return;
+  if (lan_bridge.handleCommand(cmd, reply, reply_len)) return;
   if (updater.handleCommand(cmd, reply, reply_len)) return;
   if (the_mesh.handleWatchCommand(cmd, reply, reply_len)) return;
   if (the_mesh.handleChanCommand(cmd, reply, reply_len)) return;
@@ -164,6 +166,8 @@ void setup() {
   the_mesh.setHomeChatHandler([](const char* from, const char* text, int8_t snr4, uint8_t hops) {
     mqtt_link.publishChatIn(from, text, snr4, hops);   // channel "Home" -> Home Assistant
   });
+  lan_bridge.begin(&the_mesh, &wifi_link, the_mesh.self_id.pub_key);
+  the_mesh.setRxHook([](const mesh::Packet* pkt) { lan_bridge.onRadioRx(pkt); });
   updater.begin(&wifi_link);
   mqtt_link.setUpdater(&updater);
   setUpdaterClock([]() -> uint32_t { return rtc_clock.getCurrentTime(); });
@@ -233,6 +237,7 @@ void loop() {
   the_mesh.loopDiy();
   wifi_link.loop();
   mqtt_link.loop();
+  lan_bridge.loop();
   updater.loop();
 #ifdef DISPLAY_CLASS
   {  // show the panel address on the OLED as soon as Wi-Fi gets one

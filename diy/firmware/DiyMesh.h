@@ -163,6 +163,12 @@ public:
   struct Watch { uint8_t key[4]; uint8_t sz; uint8_t hours; bool heard, alarm; uint32_t last_ms; char name[24]; };
   typedef void (*WatchFn)(const char* key_hex, const char* name, bool online, bool removed);
   void setWatchHandler(WatchFn fn) { _watch_fn = fn; }
+
+  // ---------- LAN bridge (LanBridge.cpp) ----------
+  // every packet heard over LoRa goes to this hook; a packet from the bridge is queued as if received
+  typedef void (*RxHookFn)(const mesh::Packet* pkt);
+  void setRxHook(RxHookFn fn) { _rx_hook = fn; }
+  bool injectPacket(const uint8_t* raw, int len);   // false: pool full or bad packet
   int watchCount() const { return _watch_n; }
   Watch& watchAt(int i) { return _watch[i]; }
   void watchKeyHex(const Watch& w, char* out) const;   // out: 9 bytes
@@ -230,6 +236,7 @@ private:
   int _watch_n = 0;
   uint32_t _watch_check_ms = 0;
   WatchFn _watch_fn = nullptr;
+  RxHookFn _rx_hook = nullptr;
   void loadWatch();
   void saveWatch();
   void loopWatch();

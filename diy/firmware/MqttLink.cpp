@@ -4,6 +4,7 @@
 #include "WebPanel.h"      // diyResetReason()
 #include "Updater.h"
 #include "DiySensors.h"
+#include "LanBridge.h"
 
 #include <WiFi.h>
 #include <Preferences.h>
@@ -235,6 +236,9 @@ static const SensorDef SENSORS[] = {
   {"wifi_rssi", "Сигнал Wi-Fi",           "dBm",     "signal_strength", "measurement",      true,  nullptr},
   {"heap",      "Свободная память",       "kB",      "data_size",       "measurement",      true,  nullptr},
   {"reset",     "Причина перезагрузки",   nullptr,   nullptr,           nullptr,            true,  "mdi:restart"},
+  {"lan_peers", "Мост LAN: соседей",      nullptr,   nullptr,           "measurement",      false, "mdi:lan-connect"},
+  {"lan_rx",    "Мост LAN: принято",      nullptr,   nullptr,           "total_increasing", true,  "mdi:lan-pending"},
+  {"lan_tx",    "Мост LAN: передано",     nullptr,   nullptr,           "total_increasing", true,  "mdi:lan-pending"},
 #ifdef DIY_HAS_BATTERY
   {"batt",      "Напряжение батареи",     "V",       "voltage",         "measurement",      false, nullptr},
 #endif
@@ -457,12 +461,13 @@ void MqttLink::publishState() {
   snprintf(payload, sizeof(payload),
            "{\"rx_total\":%lu,\"tx_total\":%lu,\"rx_min\":%u,\"tx_min\":%u,\"noise\":%d,%s,"
            "\"air_tx\":%s,\"air_rx\":%s,\"nodes\":%d,\"direct\":%d,\"blocked\":%lu,"
-           "\"uptime\":%lu,\"wifi_rssi\":%d,\"heap\":%lu,\"reset\":\"%s\"%s}",
+           "\"uptime\":%lu,\"wifi_rssi\":%d,\"heap\":%lu,\"reset\":\"%s\",\"lan_peers\":%d,\"lan_rx\":%lu,\"lan_tx\":%lu%s}",
            (unsigned long)(_mesh->rx_flood + _mesh->rx_direct), (unsigned long)(_mesh->tx_flood + _mesh->tx_direct),
            m.valid ? m.rx : 0, m.valid ? m.tx : 0, _mesh->noiseFloor(), last,
            n24 ? String(tx24 * 100.0f / span, 2).c_str() : "null", n24 ? String(rx24 * 100.0f / span, 2).c_str() : "null",
            _mesh->num_nodes, direct, (unsigned long)_mesh->blocked_count,
-           (unsigned long)(millis() / 1000), _wifi ? _wifi->rssi() : 0, (unsigned long)(ESP.getFreeHeap() / 1024), diyResetReason(), batt);
+           (unsigned long)(millis() / 1000), _wifi ? _wifi->rssi() : 0, (unsigned long)(ESP.getFreeHeap() / 1024), diyResetReason(),
+           lan_bridge.running() ? lan_bridge.activePeers() : 0, (unsigned long)lan_bridge.rxCount(), (unsigned long)lan_bridge.txCount(), batt);
   publish(topic, payload, true);
 }
 

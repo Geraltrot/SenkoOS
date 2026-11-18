@@ -39,6 +39,7 @@ SenkoOS — это обычный ретранслятор [MeshCore](https://gi
 | 📟 **Экран OLED** | трафик, радио, система (и батарея на Heltec) — страницы листаются кнопкой |
 | 🔋 **Батарея** | напряжение на Heltec V3 / V4 — в панели, на экране и в Home Assistant |
 | 🌡 **Датчики I2C** | BME/BMP280, AHT, SHT, INA и другие находятся сами и уходят в HA и в телеметрию MeshCore |
+| 🔗 **Мост LAN** | несколько ретрансляторов на одной точке (антенны в разные стороны) обмениваются пакетами по Wi-Fi, а не по эфиру; подпись HMAC, поиск узлов в сети сам |
 | 📡 **Радио не ждёт** | загрузка прошивки по Wi-Fi идёт в отдельной задаче — ретрансляция не прерывается |
 
 ## Поддерживаемые платы
@@ -204,6 +205,7 @@ SenkoOS — неофициальная сборка поверх [MeshCore](http
 - **Home Assistant** via MQTT discovery: traffic and radio sensors, battery voltage (Heltec), auto-detected I2C sensors (BME/BMP280, AHT, SHT, INA…), a firmware **update entity**;
 - a private **"Home" channel** bridged to Home Assistant — commands and notifications in a normal MeshCore chat — plus up to 4 more channels (key, #hashtag, Public) to chat from the browser;
 - **signed OTA updates** per board (Ed25519 manifest, SHA-256 and chip check, automatic rollback after failed boots), installed without stopping packet forwarding;
+- a **LAN bridge**: several repeaters at one site (antennas in different directions) exchange packets over Wi-Fi instead of the air (HMAC-signed UDP, automatic discovery);
 - an **OLED** UI: 128×128 on SenkoPhone, 128×64 on Heltec.
 
 | Board | Release file | `--chip` |

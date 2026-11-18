@@ -90,6 +90,18 @@ void DiyMesh::logRx(mesh::Packet* pkt, int len, float score) {
   int16_t rssi = (int16_t)_radio->getLastRSSI();
   addLog(0, pkt, len, pkt->_snr, rssi);
   notePacketRx(pkt, pkt->_snr, rssi);
+  if (_rx_hook) _rx_hook(pkt);   // LAN bridge: pass on to the other repeaters
+}
+
+// a packet from the LAN bridge: processed like one just received over LoRa (dedup, filters,
+// forwarding), so the repeater re-sends it in its own direction
+bool DiyMesh::injectPacket(const uint8_t* raw, int len) {
+  mesh::Packet* pkt = _mgr->allocNew();
+  if (!pkt) return false;
+  if (!pkt->readFrom(raw, len)) { _mgr->free(pkt); return false; }
+  pkt->_snr = 0;
+  _mgr->queueInbound(pkt, millis());
+  return true;
 }
 
 void DiyMesh::logTx(mesh::Packet* pkt, int len) {

@@ -689,7 +689,16 @@ function renderOverview() {
     tiles.push(tile(10, "Bt", v.toFixed(2) + " В", "батарея", "≈ " + pct + " % · Li-ion 3,3 … 4,2 В", pct < 20 ? "var(--bad)" : "var(--ok)",
       '<div class="meter" style="--c:' + (pct < 20 ? "var(--bad)" : "var(--ok)") + '"><i style="width:' + pct + '%"></i></div>'));
   }
-  const z0 = s.batt_mv ? 11 : 10;
+  // LAN bridge between repeaters: state, nodes heard, packets both ways
+  const L = s.lan;
+  if (L && L.state !== "off") {
+    const act = (L.peers || []).filter(p => p.ago >= 0 && p.ago < 95);
+    tiles.push(tile(10 + (s.batt_mv ? 1 : 0), "Ln", act.length + " узл.", "мост LAN · " + esc(LAN_RU[L.state] || L.state),
+      (act.map(p => esc(p.name || p.ip) + " (" + ago(p.ago) + ")").join(" · ") || "никого не слышно") + " · из LAN " + L.rx + " · в LAN " + L.tx + (L.bad ? " · чужих " + L.bad : "") +
+      (L.replay ? " · повторов " + L.replay : "") + (L.rate_drop ? " · сверх лимита " + L.rate_drop : "") + (L.hop_drop ? " · по переходам " + L.hop_drop : ""),
+      L.state === "linked" ? "var(--acc)" : "var(--warn)"));
+  }
+  const z0 = 10 + (s.batt_mv ? 1 : 0) + (L && L.state !== "off" ? 1 : 0);
   // I2C sensors found by the board (BMP/BME280, AHT, SHT, INA, ...): one tile per sensor channel
   const byCh = {};
   (s.sensors || []).forEach(([ch, name, v, unit]) => (byCh[ch] = byCh[ch] || []).push([name, v, unit]));
@@ -1200,15 +1209,22 @@ const SETTINGS = [
   ["Тайминги и прочее", [F("Airtime factor", "af", v => "set af " + v, "доля эфира на TX относительно RX (1.0 — поровну)"), F("RX delay base", "rxdelay", v => "set rxdelay " + v), F("TX delay factor", "txdelay", v => "set txdelay " + v),
     F("Direct TX delay", "dtxdelay", v => "set direct.txdelay " + v), F("Порог помех", "int_thresh", v => "set int.thresh " + v, "0 — выкл"),
     F("CAD перед передачей", "cad", v => "set cad " + v, "", {sel: [["on", "вкл"], ["off", "выкл"]], map: v => v ? "on" : "off"}), F("AGC reset, с", "agc", v => "set agc.reset.interval " + v),
-    F("Multi-ACK", "multi_acks", v => "set multi.acks " + v), F("Множитель АЦП", "adc_mult", v => "set adc.multiplier " + v, "0 — по умолчанию платы (батареи на этой плате нет)")]],
+    F("Multi-ACK", "multi_acks", v => "set multi.acks " + v), F("Множитель АЦП", "adc_mult", v => "set adc.multiplier " + v, "0 — по умолчанию платы")]],
   ["Wi-Fi", [F("Сеть (SSID)", "wifi_ssid", v => "wifi ssid " + v, "после смены сети нажмите «Подключить» ниже"), F("Пароль Wi-Fi", "_wpwd", v => "wifi pwd " + v, "только запись", {type: "password"})]],
   ["Канал «Дом» (чат с Home Assistant)", [F("Ключ канала", "_hckey", v => "home channel " + v, "ключ приватного канала из приложения MeshCore (hex или base64); только запись", {type: "password"}),
     F("Название", "home_name", v => "home name " + v, "только для панели"), F("Отправить в канал", "_hcsay", v => "home say " + v, "проверка: сообщение уйдёт в канал от имени ретранслятора")]],
+  ["Мост LAN между ретрансляторами", [F("Мост", "lan_on", v => "lan " + v, "ретрансляторы SenkoOS в одной сети обмениваются пакетами по Wi-Fi, а не по LoRa: каждый передаёт услышанное другими в свою сторону", {sel: [["on", "вкл"], ["off", "выкл"]], map: v => v ? "on" : "off"}),
+    F("Секрет моста", "_lansec", v => "lan secret " + v, "8–32 символа, одинаковый на всех ретрансляторах моста; только запись", {type: "password"}),
+    F("Порт UDP", "lan_port", v => "lan port " + v, "одинаковый на всех; по умолчанию 4280"),
+    F("Предел переходов", "lan_hops", v => "lan hops " + v, "кадр, прошедший столько узлов-посредников, отбрасывается (1–8, по умолчанию 2)"),
+    F("Добавить адрес", "_lanadd", v => "lan peer add " + v, "только для ретрансляторов в другой подсети или через VPN (до 4); в своей подсети они находятся сами"),
+    F("Удалить адрес", "_landel", v => "lan peer del " + v)]],
   ["MQTT → Home Assistant", [F("Отправлять в HA", "mqtt_on", v => "mqtt " + v, "датчики появятся в HA сами (MQTT discovery)", {sel: [["on", "вкл"], ["off", "выкл"]], map: v => v ? "on" : "off"}),
     F("Брокер", "mqtt_host", v => "mqtt host " + v, "адрес Home Assistant с Mosquitto, например 192.168.1.x"), F("Порт", "mqtt_port", v => "mqtt port " + v, "обычно 1883"),
     F("Пользователь", "mqtt_user", v => "mqtt user " + v, "отдельный пользователь брокера для ретранслятора"),
     F("Пароль", "_mqpwd", v => "mqtt pwd " + v, "только запись", {type: "password"}), F("Интервал, с", "mqtt_int", v => "mqtt interval " + v, "как часто отправлять данные, 30–3600")]],
 ];
+const LAN_RU = {off: "выключен", "no secret": "не задан секрет", "no wifi": "нет Wi-Fi", starting: "запускается…", alone: "включён, других узлов пока нет", linked: "на связи"};
 const MQTT_RU = {off: "выключено", "no broker": "не задан брокер", "no wifi": "нет Wi-Fi", connecting: "подключается…", connected: "подключено"};
 let prefs = null;
 async function loadSettings() {
@@ -1219,11 +1235,17 @@ async function loadSettings() {
     '<div class="f"><label>Память</label><span>свободно ' + kb(status.heap.free) + ", минимум " + kb(status.heap.min_free) + "</span><span></span></div></div>";
   SETTINGS.forEach(([title, fields], gi) => {
     if (title.startsWith("MQTT") && prefs.mqtt_on === undefined) return;   // firmware without MQTT
+    if (title.startsWith("Мост") && prefs.lan_on === undefined) return;    // firmware without the LAN bridge
     if (title.startsWith("Канал") && prefs.home_set === undefined) return;   // firmware without the channel
     h += '<div class="grp"><h3>' + title + "</h3>";
     if (title.startsWith("Канал")) h += '<div class="f"><label>Состояние</label><span class="' + (prefs.home_set ? "ok" : "dim") + '">' +
       (prefs.home_set ? "включён · принято " + prefs.home_rx + " · отправлено " + prefs.home_tx : "выключен — вставьте ключ канала") +
       '</span>' + (prefs.home_set ? '<button class="q red" type="button" id="hcOff">отключить</button>' : "<span></span>") + "</div>";
+    if (title.startsWith("Мост")) {
+      const L = status.lan || {};
+      h += '<div class="f"><label>Состояние</label><span class="' + (L.state === "linked" ? "ok" : L.state === "off" || !L.state ? "dim" : "warn") + '">' +
+        esc(LAN_RU[L.state] || L.state || "—") + (prefs.lan_secret_set ? "" : " · секрет не задан") + (prefs.lan_peers ? " · адреса: " + esc(prefs.lan_peers) : "") + "</span><span></span></div>";
+    }
     if (title.startsWith("MQTT")) h += '<div class="f"><label>Состояние</label><span class="' + (prefs.mqtt_state === "connected" ? "ok" : prefs.mqtt_state === "off" ? "dim" : "warn") + '">' +
       esc(MQTT_RU[prefs.mqtt_state] || prefs.mqtt_state) + "</span><span></span></div>";
     fields.forEach((f, fi) => {
@@ -1411,6 +1433,7 @@ function demo(p, body) {
     nf_recent: Array.from({length: 60}, (_, i) => -115 + Math.round(Math.sin(i / 5) * 2 + rnd(-1, 1))), last_rx: {snr: -9.3, rssi: -123, ago: 12, hops: 3, type: 8, from: "DA"},
     air24: {tx_ms: 160000, rx_ms: 520000, span_s: 25200}, air_total: {tx_ms: 160000, rx_ms: 520000},
     // ?heltec in the address: Heltec V4 sample (battery tile, ESP32-S3 firmware check)
+    lan: {state: "linked", port: 4280, hops: 2, rx: 412, tx: 388, dup: 57, bad: 0, replay: 0, rate_drop: 3, hop_drop: 0, peers: [{ip: "192.168.0.51", name: "Demo North", fixed: false, ago: 12, rx: 412, tx: 0}]},
     ...(/heltec/.test(location.search) ? {board: "Heltec V4", board_id: "heltec_v4", chip_id: 9, batt_mv: 3870, diy_version: "v1.4.0-mc1.18.0-20261120"} : {board_id: "e22wroom", chip_id: 0})});
   if (p === "/api/setup") return body ? r({ok: true, reboot: !!body.freq, wifi: !!body.ssid})
     : r({via_ap: location.hash === "#setup", open: true, need_password: location.hash === "#setup", board: "SenkoPhone 1.0", name: "SenkoPhone", lat: 0, lon: 0,
@@ -1472,7 +1495,7 @@ function demo(p, body) {
     return r({pending: !done, ok: done, sent: true, rtt_ms: 2140, sz: 1, hops: full.map(id => done ? {id, snr: +rnd(-12, 9).toFixed(2)} : {id}), final_snr: done ? 3.25 : null});
   }
   if (p === "/api/prefs") return r({name: "Demo Repeater", owner: "demo", lat: 55.7520, lon: 37.6175, freq: 868.918, bw: 62.5, sf: 9, cr: 7, tx: 22, rxgain: 1, repeat: 1, adv_int: 60, fadv_int: 47, fmax: 64, fmax_uns: 64,
-    fmax_adv: 8, loop: 0, hash_mode: 0, af: 1.0, rxdelay: 0, txdelay: 0.5, dtxdelay: 0.3, int_thresh: 0, cad: 0, agc: 0, multi_acks: 0, adc_mult: 0, read_only: 0, has_guest: false, regions: "*^ F", region_home: " home is *", wifi_ssid: "DemoWiFi", web_pwd_set: false, mqtt_on: 1, mqtt_host: "192.168.0.10", mqtt_port: 1883, mqtt_user: "repeater", mqtt_int: 60, mqtt_state: "connected", home_set: true, home_name: "Дом", home_rx: 12, home_tx: 5});
+    fmax_adv: 8, loop: 0, hash_mode: 0, af: 1.0, rxdelay: 0, txdelay: 0.5, dtxdelay: 0.3, int_thresh: 0, cad: 0, agc: 0, multi_acks: 0, adc_mult: 0, read_only: 0, has_guest: false, regions: "*^ F", region_home: " home is *", wifi_ssid: "DemoWiFi", web_pwd_set: false, lan_on: 1, lan_hops: 2, lan_port: 4280, lan_secret_set: true, lan_peers: "10.8.0.3", mqtt_on: 1, mqtt_host: "192.168.0.10", mqtt_port: 1883, mqtt_user: "repeater", mqtt_int: 60, mqtt_state: "connected", home_set: true, home_name: "Дом", home_rx: 12, home_tx: 5});
   if (p === "/api/cli") {
     const a = body.cmd.split(" ");
     if (a[0] === "chan" && a[1] === "add") {

@@ -3,6 +3,7 @@
 #include "MqttLink.h"
 #include "Updater.h"
 #include "DiySensors.h"
+#include "LanBridge.h"
 #include "DiyMesh.h"
 #include "JsonOut.h"
 
@@ -302,6 +303,7 @@ void WebPanel::handleStatus() {
   for (auto& b : _mesh->tens) if (b.valid) { rx24 += b.rx_air_ms; tx24 += b.tx_air_ms; n24++; }
   j.f(",\"air24\":{\"tx_ms\":%lu,\"rx_ms\":%lu,\"span_s\":%lu}", (unsigned long)tx24, (unsigned long)rx24,
       (unsigned long)(n24 ? (n24 * 600UL < now_ms / 1000 ? n24 * 600UL : now_ms / 1000) : 0));
+  lan_bridge.writeStatus(j);
   j.f(",\"air_total\":{\"tx_ms\":%lu,\"rx_ms\":%lu}", (unsigned long)_mesh->airTxMs(), (unsigned long)_mesh->airRxMs());
   j.raw("}");
   j.end();
@@ -605,6 +607,7 @@ void WebPanel::handlePrefs() {
   j.f(",\"home_set\":%s,\"home_rx\":%lu,\"home_tx\":%lu", _mesh->homeChannelSet() ? "true" : "false",
       (unsigned long)_mesh->home_rx, (unsigned long)_mesh->home_tx);
   j.raw(",\"home_name\":").str(_mesh->homeChannelName());
+  lan_bridge.writePrefs(j);   // the bridge secret is never sent back
   if (_mqtt) {   // the broker password is never sent back
     j.f(",\"mqtt_on\":%u,\"mqtt_port\":%u,\"mqtt_int\":%u", _mqtt->enabled() ? 1 : 0, (unsigned)_mqtt->port(), (unsigned)_mqtt->interval());
     j.raw(",\"mqtt_host\":").str(_mqtt->host()).raw(",\"mqtt_user\":").str(_mqtt->user()).raw(",\"mqtt_state\":").str(_mqtt->stateText());
