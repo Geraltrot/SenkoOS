@@ -4,6 +4,18 @@
 // Elements with class "notr" (chat messages, console output) are left as they are.
 // diy/scripts/embed_web.py inlines this file into index.html at build time.
 const EN = [
+  ["если ни один ретранслятор рядом не переслал наше сообщение, оно уходит ещё раз (те же байты, дублей не будет); 0 — выкл", "if no repeater nearby passed our message on, it is sent again (the same bytes, no duplicates); 0 = off"],
+  ["только между ретрансляторами SenkoOS: если из длинного сообщения [1/3]…[3/3] пропала часть, плата просит отправителя прислать её снова. Включайте на всех платах; приложение MeshCore может показать повторную часть дважды", "SenkoOS repeaters only: when a part of a long message [1/3]…[3/3] is missing, the board asks the sender to send it again. Turn it on on every board; the MeshCore app may show a re-sent part twice"],
+  ["нет связи с брокером дольше 2 мин — сообщение в канал «Дом» (по LoRa), и ещё одно, когда связь вернётся; не чаще раза в 30 мин", "no broker for over 2 min: a message to the \u201cHome\u201d channel (over LoRa), and one more when the link is back; at most once per 30 min"],
+  ["ни один ретранслятор рядом не переслал сообщение, все повторы исчерпаны", "no repeater nearby passed the message on, all resends used"],
+  ["ретрансляторы рядом переслали сообщение дальше", "repeaters nearby passed the message on"],
+  ["пакетов, прошедших через этот репитер за последний час (по путям услышанных пакетов)", "packets that passed through this repeater in the last hour (from the paths of heard packets)"],
+  ["колба — ретрансляторы SenkoOS", "flask = SenkoOS repeaters"],
+  ["Доставка сообщений", "Message delivery"], ["Повторы без эха", "Resends without echo"], ["Дозапрос частей", "Ask for missing parts"],
+  ["Сообщать о разрыве", "Report broker loss"], ["транзит за час", "transit in the last hour"], ["Транзит, ч", "Transit, 1 h"],
+  ["запросов частей", "part requests"], ["частей заново", "parts re-sent"], ["без эха", "no echo"], ["с эхом", "with echo"],
+  ["Счётчики", "Counters"], ["отправляется", "sending"], ["эха нет", "no echo"], ["повтор", "resend"], ["ретр.", "rep."],
+  ["последний", "last"], ["всего", "total"], ["пак.", "pkts"],
   ["Дополнительный канал: только чат в панели, в Home Assistant не передаётся. Хранятся последние 16 сообщений с момента загрузки платы.", "Extra channel: panel chat only, not sent to Home Assistant. The last 16 messages since the board started are kept."],
   ["До 4 каналов вдобавок к «Дому» — только для чата в панели: в Home Assistant они не передаются, команды и тревоги работают через «Дом». Ключ — как в приложении (hex или base64), #хэштег или public. Каналы #хэштег и Public не приватные: их читает любой, кто знает название.", "Up to 4 channels in addition to \u201cHome\u201d, for the panel chat only: they are not sent to Home Assistant; commands and alarms go through \u201cHome\u201d. Key as in the app (hex or base64), #hashtag or public. #hashtag and Public channels are not private: anyone who knows the name can read them."],
   ["Введите ключ канала, #хэштег или public", "Enter a channel key, #hashtag or public"],

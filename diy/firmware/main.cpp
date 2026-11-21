@@ -86,6 +86,7 @@ static void run_command(char* cmd, char* reply, size_t reply_len) {
   if (lan_bridge.handleCommand(cmd, reply, reply_len)) return;
   if (updater.handleCommand(cmd, reply, reply_len)) return;
   if (the_mesh.handleWatchCommand(cmd, reply, reply_len)) return;
+  if (the_mesh.handleDeliverCommand(cmd, reply, reply_len)) return;
   if (the_mesh.handleChanCommand(cmd, reply, reply_len)) return;
   if (the_mesh.handleHomeCommand(cmd, reply, reply_len)) {
     if (strncmp(cmd, "home channel", 12) == 0) mqtt_link.requestDiscovery();   // add / remove the chat entities in HA
@@ -227,6 +228,7 @@ void loop() {
 
   board.loop();   // let the board feed its watchdog, run periodic housekeeping
 
+  the_mesh.loopAdvert();   // periodic adverts with the SenkoOS mark, just before MyMesh would send its own
   the_mesh.loop();
   sensors.loop();
 #ifdef DISPLAY_CLASS

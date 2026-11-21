@@ -37,6 +37,7 @@ public:
 
   bool enabled() const { return _on; }
   bool connected() const { return _connected; }
+  bool alertOn() const { return _alert; }
   const char* host() const { return _host; }
   uint16_t port() const { return _port; }
   const char* user() const { return _user; }
@@ -62,6 +63,11 @@ private:
   static void onEvent(void* arg, const char* base, int32_t id, void* data);
 
   DiyMesh* _mesh = nullptr;
+  // broker lost / back -> channel "Home"
+  bool _alert = true, _was_up = false;
+  uint8_t _alert_state = 0;              // 0 idle, 1 "lost" sent, 3 "back" to send
+  uint32_t _down_ms = 0, _alert_last_ms = 0, _alert_lost_ms = 0;
+  void loopAlert(bool wifi_ok);
   WifiLink* _wifi = nullptr;
   void* _client = nullptr;              // esp_mqtt_client_handle_t
   volatile bool _connected = false;

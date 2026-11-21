@@ -33,6 +33,9 @@ private:
   };
 
   bool authorized();
+  const char* cookieName();
+  String sessionToken();
+  char _cookie[8] = "";
   bool requireAuth();
   const char* loginPassword();
   void dropSessions();

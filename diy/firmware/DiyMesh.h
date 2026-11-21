@@ -94,6 +94,9 @@ public:
     uint8_t hops;            // hops of the last advert
     uint32_t last_ms, count;
     int32_t lat, lon;        // 1e-6 deg, 0 = n/a
+    uint8_t senko;           // SenkoOS mark from the advert: 0x80 | (major << 4 | minor), 0 = other firmware
+    uint16_t relay10[6];     // packets heard that passed through this repeater, per 10 min (last hour)
+    uint32_t relay_total, relay_last_ms;
   };
   NodeInfo nodes[MAX_NODES] = {};
   int num_nodes = 0;
@@ -101,6 +104,8 @@ public:
   bool startScan();
   void clearNodes();
   const NodeInfo* findNodeByPrefix(const uint8_t* key, int sz) const;
+  uint32_t relayHour(const NodeInfo& n) const { uint32_t t = 0; for (int i = 0; i < 6; i++) t += n.relay10[i]; return t; }
+  bool isSenkoName(const char* name) const;
 
   // ---------- path graph ----------
   static const int MAX_GNODES = 320;
@@ -132,7 +137,7 @@ public:
   // ---------- private channel "Home" <-> Home Assistant (HomeChannel.cpp) ----------
   typedef void (*HomeChatFn)(const char* sender, const char* text, int8_t snr4, uint8_t hops);
   void setHomeChatHandler(HomeChatFn fn) { _home_chat_fn = fn; }
-  void beginHome() { loadHome(); loadChans(); loadWatch(); }
+  void beginHome() { loadHome(); loadChans(); loadWatch(); loadDelivery(); }
   bool homeChannelSet() const { return _home_set; }
   const char* homeChannelName() const { return _home_name; }
   bool sendHomeChat(const char* text) { return sendChat(0, text); }
@@ -142,13 +147,14 @@ public:
   bool chanSet(int c) const;
   const char* chanName(int c) const;
   uint8_t chanHash(int c) const;
-  bool sendChat(int c, const char* text);
+  bool sendChat(int c, const char* text, bool part = false, uint32_t* ts_out = nullptr);
   // long text: split into packets " [1/3]" ... and send them one by one, 12 s apart (one long text at a time)
   bool queueChat(int c, const char* text);
-  int homeQueued() const { return _home_parts_n - _home_parts_i; }
+  int homeQueued() const { return _home_parts_n - _home_parts_i + __builtin_popcount(_lm_resend); }
   int queuedChan() const { return _home_parts_ch; }
   // last messages of each channel (both ways) for the panel chat
-  struct ChatMsg { uint32_t seq, ts; uint8_t out; int8_t snr4; char from[24]; char text[152]; };
+  // dl (our messages): 0 = n/a, 1 = sent, waiting for an echo, 2 = a repeater re-sent it (echo), 3 = no echo after all resends
+  struct ChatMsg { uint32_t seq, ts; uint8_t out; int8_t snr4; uint8_t dl, echo, tries; char from[24]; char text[152]; };
   static const int CHAT_KEEP = 30, CHAT_KEEP_X = 16;   // "Home" / each extra channel
   int chatCount(int c) const { return _chat_n[c]; }
   uint32_t chatLastSeq(int c) const { return _chat_last[c]; }
@@ -157,6 +163,24 @@ public:
     return _chat[b + (_chat_head[c] - _chat_n[c] + i + k) % k];
   }
   bool handleChanCommand(const char* command, char* reply, size_t reply_len);
+  uint32_t chatVersion() const { return _chat_ver; }   // changes when a message or its delivery mark changes
+
+  // ---------- delivery (Delivery.cpp) ----------
+  // Echo check: a flood packet we send is re-sent by the repeaters around us, we hear that "echo".
+  // No echo within the window -> the same bytes are sent again (nobody has them in the dedup table yet).
+  // Missing parts "[i/n]": SenkoOS boards ask the sender (an invisible GRP_DATA packet in the same channel)
+  // and the sender re-sends just those parts as new packets.
+  struct DeliveryStats { uint32_t sent, echoed, resent, failed, asks_tx, asks_rx, parts_resent, dups; };
+  DeliveryStats dl = {};
+  uint8_t dl_retry = 2;     // resends without an echo, 0 = off
+  bool dl_ask = false;      // ask for / answer missing parts (SenkoOS only)
+  bool handleDeliverCommand(const char* command, char* reply, size_t reply_len);
+
+  // ---------- SenkoOS mark in our advert (FEAT2 = 'S' << 8 | version) ----------
+  static const uint8_t SENKO_MARK = 0x53;
+  uint8_t senkoVersionByte() const;
+  void sendSelfAdvertisement(int delay_millis, bool flood) override;
+  void loopAdvert();   // call before MyMesh::loop(): sends the periodic adverts with the mark
 
   // ---------- watch list: neighbours that must be heard (DiyWatch.cpp) ----------
   static const int MAX_WATCH = 8;
@@ -179,7 +203,7 @@ public:
   uint32_t home_rx = 0, home_tx = 0;
 
 protected:
-  void logRx(mesh::Packet* pkt, int len, float score) override;
+  void logRx(mesh::Packet* pkt, int len, float score) override;   // also: echo of our packets
   void logTx(mesh::Packet* pkt, int len) override;
   void logTxFail(mesh::Packet* pkt, int len) override;
   bool allowPacketForward(const mesh::Packet* packet) override;
@@ -221,7 +245,35 @@ private:
   int _home_parts_n = 0, _home_parts_i = 0;
   uint32_t _home_next_ms = 0;
   void loopHome();
-  void addChat(int c, uint8_t out, const char* from, const char* text, int8_t snr4);
+  uint32_t addChat(int c, uint8_t out, const char* from, const char* text, int8_t snr4);
+  ChatMsg* chatBySeq(int c, uint32_t seq);
+  uint32_t _chat_ver = 0;
+  // delivery
+  static const int MAX_OUT = 4;
+  struct OutPkt {
+    uint8_t used, ch, type, len, tries, echoes, part;
+    uint8_t hash[MAX_HASH_SIZE];
+    uint8_t payload[MAX_PACKET_PAYLOAD];
+    uint32_t queued_ms, sent_ms, chat_seq;
+  };
+  OutPkt _out[MAX_OUT] = {};
+  void trackOut(int c, const mesh::Packet* pkt, uint32_t chat_seq, bool part);
+  void noteOutTx(const mesh::Packet* pkt);
+  void noteOutEcho(const mesh::Packet* pkt);
+  bool partInFlight() const;
+  uint32_t echoWindowMs(int len);
+  void loopDelivery();
+  void loadDelivery();
+  void saveDelivery();
+  struct Reasm { uint8_t used, ch, n, mask, asks, ref_i; char from[24]; uint16_t crc[6]; uint32_t ref_ts, last_ms, ask_ms; };
+  Reasm _rs[4] = {};
+  bool notePart(int c, const char* sender, const char* text, uint32_t ts);   // false = a part we already have
+  void loopAsks();
+  void onSenkoData(int c, const uint8_t* d, int len);
+  // the last long message we sent: parts can be asked for again
+  uint8_t _lm_n = 0, _lm_ch = 0, _lm_answers = 0, _lm_resend = 0;
+  uint32_t _lm_ts[6] = {}, _lm_ts0[6] = {}, _lm_ms = 0;
+  uint8_t _relay_slot = 0;
   ChatMsg _chat[CHAT_KEEP + MAX_EXTRA_CH * CHAT_KEEP_X] = {};
   int _chat_head[NUM_CH] = {}, _chat_n[NUM_CH] = {};
   uint32_t _chat_last[NUM_CH] = {};

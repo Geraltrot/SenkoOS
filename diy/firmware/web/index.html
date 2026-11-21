@@ -128,6 +128,9 @@ pre .c{color:#5cc8ff}pre .e{color:#ff8b8b}pre .m{color:#5f7d6c}
 .msg.out{align-self:flex-end;border-color:var(--acc)}
 .msg .who{font-size:11.5px;color:var(--acc);font-weight:700;margin-bottom:2px}
 .msg .meta{font-size:11px;color:var(--mut);margin-top:3px;text-align:right}
+.msg .dl{margin-left:4px}.msg .dl.ok{color:var(--ok)}.msg .dl.bad{color:var(--warn)}
+.senko-ico{background:none;border:0}.senko-ico svg{width:24px;height:24px;color:#06130c;background:#7be08f;border:1.5px solid #06130c;border-radius:50%;padding:3px;box-sizing:border-box}
+.senko-ico.far svg{background:#5cc8ff}.sk{display:inline-block;width:14px;height:14px;vertical-align:-2px;margin-right:4px;color:var(--acc)}
 .netwrap{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:12px}
 #netSvg{display:block;width:100%;height:320px;max-height:70vh;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
 #netSvg.drag{cursor:grabbing}
@@ -340,7 +343,7 @@ input[type=range]{flex:0 1 260px;padding:0;accent-color:var(--acc)}
         <button class="q" data-adv="advert" title="объявление пересылается по всей сети">advert с ретрансляцией</button>
         <button class="q red" id="nodesClear">очистить</button>
         <span class="note" id="scanNote">Сканирование просит все узлы в зоне слышимости ответить (не чаще раза в 30 с).</span></div>
-      <div class="tw scroll"><table><thead><tr><th>ID</th><th>Имя</th><th>Тип</th><th>Наш SNR</th><th>Их SNR</th><th>Хопы</th><th>Когда</th><th>Откуда</th><th></th></tr></thead><tbody id="nodeBody"></tbody></table></div>
+      <div class="tw scroll"><table><thead><tr><th>ID</th><th>Имя</th><th>Тип</th><th>Наш SNR</th><th>Их SNR</th><th>Хопы</th><th title="пакетов, прошедших через этот репитер за последний час (по путям услышанных пакетов)">Транзит, ч</th><th>Когда</th><th>Откуда</th><th></th></tr></thead><tbody id="nodeBody"></tbody></table></div>
 
       <h2>Наблюдение за узлами</h2>
       <p class="note">Если узел из списка не слышно дольше заданного времени (ни напрямую, ни в путях пакетов), в канал «Дом» и в Home Assistant уходит тревога, а когда он снова слышен — «снова на связи». Глаз 👁 в таблице соседей добавляет узел сюда.</p>
@@ -425,6 +428,8 @@ const TYPE_RU = ["запрос", "ответ", "личное сообщение"
 const CHANNELS = {release: ["релиз", "Сборка опубликованного выпуска"], beta: ["бета", "Предварительный выпуск: для проверки"], dev: ["dev", "Сборка из ветки dev или локальная: не выпуск"]};
 const ROUTES = ["T-FLOOD", "FLOOD", "DIRECT", "T-DIRECT"];
 const NODE_TYPES = ["?", "чат", "репитер", "комната", "датчик"];
+// SenkoOS version byte from the advert mark: 0x16 = v1.6, 0 = dev build
+function senkoTitle(v) { return "SenkoOS" + (v ? " v" + (v >> 4) + "." + (v & 15) : " (dev)"); }
 // TRACE goes only through nodes that forward packets (MeshCore allowPacketForward): repeaters and room servers.
 // A companion (chat) forwards only with its repeat mode on; sensors never do.
 const NO_FWD = new Set([1, 4]);
@@ -1023,11 +1028,11 @@ async function loadNodes() {
     const rows = j.n.slice().sort((a, b) => ((b.seen & 2) - (a.seen & 2)) || ((b.snr ?? -99) - (a.snr ?? -99)));
     $("nodeBody").innerHTML = rows.map(n => {
       const src = [n.seen & 1 ? "объявление" : "", n.seen & 2 ? "напрямую" : "", n.seen & 4 ? "скан" : "", n.seen & 8 && !(n.seen & 1) ? "путь" : ""].filter(Boolean).join(", ");
-      return '<tr><td class="mono"><b>' + esc(n.id.slice(0, 8)) + "</b></td><td>" + esc(n.name || "—") + "</td><td>" + (NODE_TYPES[n.type] || n.type) + '</td><td class="num ' + snrCls(n.snr) + '">' + sigBars(n.snr) + fmtSnr(n.snr) +
-        '</td><td class="num ' + snrCls(n.their_snr) + '">' + fmtSnr(n.their_snr) + '</td><td class="num">' + (n.seen & 1 ? n.hops : "—") + "</td><td>" + ago(n.ago) + '</td><td class="dim">' + src +
+      return '<tr><td class="mono"><b>' + esc(n.id.slice(0, 8)) + "</b></td><td>" + (n.senko != null ? '<svg class="sk"><title>' + senkoTitle(n.senko) + '</title><use href="#flask"/></svg>' : "") + esc(n.name || "—") + "</td><td>" + (NODE_TYPES[n.type] || n.type) + '</td><td class="num ' + snrCls(n.snr) + '">' + sigBars(n.snr) + fmtSnr(n.snr) +
+        '</td><td class="num ' + snrCls(n.their_snr) + '">' + fmtSnr(n.their_snr) + '</td><td class="num">' + (n.seen & 1 ? n.hops : "—") + '</td><td class="num"' + (n.relay ? ' title="всего ' + n.relay + " · последний " + ago(n.relay_ago) + '"' : "") + ">" + (n.relay ? n.relay_h : "—") + "</td><td>" + ago(n.ago) + '</td><td class="dim">' + src +
         '</td><td><button class="q" data-watch="' + esc(n.id.slice(0, 4)) + '" title="следить за узлом">👁</button> ' + (NO_FWD.has(n.type) ? '<button class="q" disabled style="opacity:.35;cursor:not-allowed" title="' + NO_FWD_HINT + '">+</button>'
           : '<button class="q" data-trace="' + esc(n.id.slice(0, 2)) + '" title="добавить в трассировку">+</button>') + "</td></tr>";
-    }).join("") || '<tr><td colspan="9" class="dim">Пока никого. Нажмите «Сканировать».</td></tr>';
+    }).join("") || '<tr><td colspan="10" class="dim">Пока никого. Нажмите «Сканировать».</td></tr>';
     document.querySelectorAll("[data-watch]").forEach(b => b.onclick = () => watchCmd("watch add " + b.dataset.watch + " 6"));
     document.querySelectorAll("[data-trace]").forEach(b => b.onclick = () => { const v = $("traceIn").value.trim(); $("traceIn").value = v ? v + "," + b.dataset.trace : b.dataset.trace; });
   } catch (e) {}
@@ -1061,6 +1066,15 @@ let chatLast = -1, chatCh = 0, chatSeen = {};
 try { chatSeen = JSON.parse(localStorage.getItem("chatSeen") || "{}") || {}; } catch (e) {}
 const CHAT_NOTE_HOME = "Сообщения приватного канала MeshCore: то же, что в приложении, и ответы Home Assistant. Хранятся последние 30 с момента загрузки платы.";
 const CHAT_NOTE_X = "Дополнительный канал: только чат в панели, в Home Assistant не передаётся. Хранятся последние 16 сообщений с момента загрузки платы.";
+// delivery mark of our message: echo = a repeater was heard re-sending it (not a read receipt)
+function dlMark(dl, echo, tries) {
+  const T = x => (typeof tr === "function" && LANG === "en") ? tr(x) : x;
+  const again = tries ? " · " + T("повтор") + " " + tries : "";
+  if (dl === 1) return '<span class="dl">· ' + T("отправляется") + again + "</span>";
+  if (dl === 2) return '<span class="dl ok" title="' + T("ретрансляторы рядом переслали сообщение дальше") + '">· ✓ ' + T("ретр.") + " " + echo + again + "</span>";
+  if (dl === 3) return '<span class="dl bad" title="' + T("ни один ретранслятор рядом не переслал сообщение, все повторы исчерпаны") + '">· ⚠ ' + T("эха нет") + "</span>";
+  return "";
+}
 function chatSelect(ch) { chatCh = ch; chatLast = -1; loadChat(); }
 async function loadChat() {
   let c;
@@ -1085,14 +1099,14 @@ async function loadChat() {
   $("chatTitle").textContent = "Канал «" + (c.name || "Дом") + "»" + (c.queued ? " · отправляется ещё " + c.queued + " ч." : "");
   if (!c.set) { $("chatBox").innerHTML = '<span class="dim">Канал не задан: «Настройки → Канал «Дом»» — ключ канала из приложения.</span>'; $("chatForm").classList.add("hidden"); return; }
   $("chatForm").classList.remove("hidden");
-  const last = c.m.length ? c.m[c.m.length - 1][0] : 0;
+  const last = c.m.length ? c.m[c.m.length - 1][0] + ":" + (c.ver || 0) : 0;   // ver: delivery marks changed
   if (last === chatLast) return;
   chatLast = last;
   const box = $("chatBox"), atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  box.innerHTML = c.m.length ? c.m.map(([seq, ts, out, from, text, snr]) =>
+  box.innerHTML = c.m.length ? c.m.map(([seq, ts, out, from, text, snr, dl, echo, tries]) =>
     '<div class="msg notr' + (out ? " out" : "") + '"><div class="who">' + esc(out ? "→ " + from : from || "?") + "</div>" + esc(text) +
     '<div class="meta">' + (ts > 1600000000 ? new Date(ts * 1000).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"}) : "") +
-    (snr != null ? " · SNR " + fmtSnr(snr) : "") + "</div></div>").join("") : '<span class="dim">Пока тихо. Сообщения появятся здесь.</span>';
+    (snr != null ? " · SNR " + fmtSnr(snr) : "") + dlMark(dl, echo, tries) + "</div></div>").join("") : '<span class="dim">Пока тихо. Сообщения появятся здесь.</span>';
   if (atEnd || chatLast === last) box.scrollTop = box.scrollHeight;
 }
 $("chatForm").onsubmit = async e => {
@@ -1185,11 +1199,13 @@ async function loadMap(fit) {
     const km = me ? kmBetween(me[0], me[1], n.lat, n.lon) : null;
     const pop = "<b>" + esc(n.name || n.id.slice(0, 8)) + '</b> <span style="color:#888">' + esc(n.id.slice(0, 8)) + "</span><br>" + (NODE_TYPES[n.type] || "?") +
       (km != null ? " · " + km.toFixed(1) + " км" : "") + "<br>" + (direct ? "напрямую · SNR " + fmtSnr(n.snr) + " dB" + (n.their_snr != null ? " / у них " + fmtSnr(n.their_snr) + " dB" : "") : "хопов: " + n.hops) +
-      "<br>слышали " + ago(n.ago);
-    L.circleMarker(ll, {radius: direct ? 7 : 5, color: "#06130c", weight: 1.5, fillColor: n.type === 2 ? (direct ? snrColor(n.snr) : "#5cc8ff") : "#b07cff", fillOpacity: .95}).addTo(mapLayer).bindPopup(pop);
+      "<br>слышали " + ago(n.ago) + (n.senko != null ? "<br>" + senkoTitle(n.senko) : "") +
+      (n.relay ? "<br>транзит за час: " + n.relay_h + " пак. · последний " + ago(n.relay_ago) : "");
+    if (n.senko != null) L.marker(ll, {icon: L.divIcon({className: "senko-ico" + (direct ? "" : " far"), html: '<svg><use href="#flask"/></svg>', iconSize: [24, 24], iconAnchor: [12, 12]}), title: senkoTitle(n.senko)}).addTo(mapLayer).bindPopup(pop);
+    else L.circleMarker(ll, {radius: direct ? 7 : 5, color: "#06130c", weight: 1.5, fillColor: n.type === 2 ? (direct ? snrColor(n.snr) : "#5cc8ff") : "#b07cff", fillOpacity: .95}).addTo(mapLayer).bindPopup(pop);
   }
   $("mapNote").textContent = "На карте: " + shown + " узл. с координатами из " + j.n.length + (me ? "" : " · координаты этого репитера не заданы (Настройки → Узел)") +
-    ". Линии — соседи напрямую, цвет по SNR; голубые — репитеры через хопы, фиолетовые — остальные узлы.";
+    ". Линии — соседи напрямую, цвет по SNR; голубые — репитеры через хопы, фиолетовые — остальные узлы; колба — ретрансляторы SenkoOS.";
   if ((fit || !mapFitted) && pts.length) { mapFitted = true; pts.length > 1 ? map.fitBounds(pts, {padding: [30, 30], maxZoom: 13}) : map.setView(pts[0], 12); }
 }
 
@@ -1213,6 +1229,8 @@ const SETTINGS = [
   ["Wi-Fi", [F("Сеть (SSID)", "wifi_ssid", v => "wifi ssid " + v, "после смены сети нажмите «Подключить» ниже"), F("Пароль Wi-Fi", "_wpwd", v => "wifi pwd " + v, "только запись", {type: "password"})]],
   ["Канал «Дом» (чат с Home Assistant)", [F("Ключ канала", "_hckey", v => "home channel " + v, "ключ приватного канала из приложения MeshCore (hex или base64); только запись", {type: "password"}),
     F("Название", "home_name", v => "home name " + v, "только для панели"), F("Отправить в канал", "_hcsay", v => "home say " + v, "проверка: сообщение уйдёт в канал от имени ретранслятора")]],
+  ["Доставка сообщений", [F("Повторы без эха", "dl_retry", v => "deliver retry " + v, "если ни один ретранслятор рядом не переслал наше сообщение, оно уходит ещё раз (те же байты, дублей не будет); 0 — выкл", {sel: [["0", "0 · выкл"], ["1", "1"], ["2", "2"], ["3", "3"]]}),
+    F("Дозапрос частей", "dl_ask", v => "deliver ask " + v, "только между ретрансляторами SenkoOS: если из длинного сообщения [1/3]…[3/3] пропала часть, плата просит отправителя прислать её снова. Включайте на всех платах; приложение MeshCore может показать повторную часть дважды", {sel: [["on", "вкл"], ["off", "выкл"]], map: v => v ? "on" : "off"})]],
   ["Мост LAN между ретрансляторами", [F("Мост", "lan_on", v => "lan " + v, "ретрансляторы SenkoOS в одной сети обмениваются пакетами по Wi-Fi, а не по LoRa: каждый передаёт услышанное другими в свою сторону", {sel: [["on", "вкл"], ["off", "выкл"]], map: v => v ? "on" : "off"}),
     F("Секрет моста", "_lansec", v => "lan secret " + v, "8–32 символа, одинаковый на всех ретрансляторах моста; только запись", {type: "password"}),
     F("Порт UDP", "lan_port", v => "lan port " + v, "одинаковый на всех; по умолчанию 4280"),
@@ -1222,7 +1240,8 @@ const SETTINGS = [
   ["MQTT → Home Assistant", [F("Отправлять в HA", "mqtt_on", v => "mqtt " + v, "датчики появятся в HA сами (MQTT discovery)", {sel: [["on", "вкл"], ["off", "выкл"]], map: v => v ? "on" : "off"}),
     F("Брокер", "mqtt_host", v => "mqtt host " + v, "адрес Home Assistant с Mosquitto, например 192.168.1.x"), F("Порт", "mqtt_port", v => "mqtt port " + v, "обычно 1883"),
     F("Пользователь", "mqtt_user", v => "mqtt user " + v, "отдельный пользователь брокера для ретранслятора"),
-    F("Пароль", "_mqpwd", v => "mqtt pwd " + v, "только запись", {type: "password"}), F("Интервал, с", "mqtt_int", v => "mqtt interval " + v, "как часто отправлять данные, 30–3600")]],
+    F("Пароль", "_mqpwd", v => "mqtt pwd " + v, "только запись", {type: "password"}), F("Интервал, с", "mqtt_int", v => "mqtt interval " + v, "как часто отправлять данные, 30–3600"),
+    F("Сообщать о разрыве", "mqtt_alert", v => "mqtt alert " + v, "нет связи с брокером дольше 2 мин — сообщение в канал «Дом» (по LoRa), и ещё одно, когда связь вернётся; не чаще раза в 30 мин", {sel: [["on", "вкл"], ["off", "выкл"]], map: v => v ? "on" : "off"})]],
 ];
 const LAN_RU = {off: "выключен", "no secret": "не задан секрет", "no wifi": "нет Wi-Fi", starting: "запускается…", alone: "включён, других узлов пока нет", linked: "на связи"};
 const MQTT_RU = {off: "выключено", "no broker": "не задан брокер", "no wifi": "нет Wi-Fi", connecting: "подключается…", connected: "подключено"};
@@ -1237,6 +1256,7 @@ async function loadSettings() {
     if (title.startsWith("MQTT") && prefs.mqtt_on === undefined) return;   // firmware without MQTT
     if (title.startsWith("Мост") && prefs.lan_on === undefined) return;    // firmware without the LAN bridge
     if (title.startsWith("Канал") && prefs.home_set === undefined) return;   // firmware without the channel
+    if (title.startsWith("Доставка") && prefs.dl_retry === undefined) return;   // firmware before v1.6.0
     h += '<div class="grp"><h3>' + title + "</h3>";
     if (title.startsWith("Канал")) h += '<div class="f"><label>Состояние</label><span class="' + (prefs.home_set ? "ok" : "dim") + '">' +
       (prefs.home_set ? "включён · принято " + prefs.home_rx + " · отправлено " + prefs.home_tx : "выключен — вставьте ключ канала") +
@@ -1246,6 +1266,8 @@ async function loadSettings() {
       h += '<div class="f"><label>Состояние</label><span class="' + (L.state === "linked" ? "ok" : L.state === "off" || !L.state ? "dim" : "warn") + '">' +
         esc(LAN_RU[L.state] || L.state || "—") + (prefs.lan_secret_set ? "" : " · секрет не задан") + (prefs.lan_peers ? " · адреса: " + esc(prefs.lan_peers) : "") + "</span><span></span></div>";
     }
+    if (title.startsWith("Доставка") && status.dl) { const d = status.dl; h += '<div class="f"><label>Счётчики</label><span>отправлено ' + d.sent + " · с эхом " + d.echo + " · повторов " + d.resent + " · без эха " + d.failed +
+      (d.asks_tx || d.asks_rx || d.parts ? " · запросов частей " + d.asks_tx + "/" + d.asks_rx + " · частей заново " + d.parts : "") + "</span><span></span></div>"; }
     if (title.startsWith("MQTT")) h += '<div class="f"><label>Состояние</label><span class="' + (prefs.mqtt_state === "connected" ? "ok" : prefs.mqtt_state === "off" ? "dim" : "warn") + '">' +
       esc(MQTT_RU[prefs.mqtt_state] || prefs.mqtt_state) + "</span><span></span></div>";
     fields.forEach((f, fi) => {
@@ -1418,10 +1440,10 @@ const D = {cseq: 100, xch: {
     [103, Math.floor(Date.now() / 1000) - 300, 0, "Bravo", "new repeater on the hill is up", 6]]},
   2: {name: "#lora", m: [[104, Math.floor(Date.now() / 1000) - 200, 0, "Nina", "кто-нибудь пробовал SF8 на 62.5?", 2.75]]}}, chat: [
   [1, Math.floor(Date.now() / 1000) - 600, 0, "Ivan", "погода", 7.25],
-  [2, Math.floor(Date.now() / 1000) - 590, 1, "Demo Repeater", "⛅ Сейчас: перем. обл.\n🌡 4.5° (ощ. -0.3°)\n💧 77%  💨 14 км/ч\n🔽 987 гПа [1/3]", null],
-  [3, Math.floor(Date.now() / 1000) - 578, 1, "Demo Repeater", "☁ 13.11 облачно 5°/1° 💧91% 💨18\n🌧 14.11 дождь 11°/4° 💧98% 💨22 [2/3]", null],
-  [4, Math.floor(Date.now() / 1000) - 566, 1, "Demo Repeater", "☁ 15.11 облачно 5°/0° 💧87% 💨18 [3/3]", null],
-  [5, Math.floor(Date.now() / 1000) - 120, 1, "Demo Repeater", "⚠ Узел Charlie Rep (30AA) молчит больше 12 ч", null],
+  [2, Math.floor(Date.now() / 1000) - 590, 1, "Demo Repeater", "⛅ Сейчас: перем. обл.\n🌡 4.5° (ощ. -0.3°)\n💧 77%  💨 14 км/ч\n🔽 987 гПа [1/3]", null, 2, 3, 0],
+  [3, Math.floor(Date.now() / 1000) - 578, 1, "Demo Repeater", "☁ 13.11 облачно 5°/1° 💧91% 💨18\n🌧 14.11 дождь 11°/4° 💧98% 💨22 [2/3]", null, 2, 1, 1],
+  [4, Math.floor(Date.now() / 1000) - 566, 1, "Demo Repeater", "☁ 15.11 облачно 5°/0° 💧87% 💨18 [3/3]", null, 3, 0, 2],
+  [5, Math.floor(Date.now() / 1000) - 120, 1, "Demo Repeater", "⚠ Узел Charlie Rep (30AA) молчит больше 12 ч", null, 2, 2, 0],
   [6, Math.floor(Date.now() / 1000) - 60, 0, "Olga", "спасибо, вижу 👍", 3.5]], t0: Date.now(), seq: 0, blocked: new Set([0x2E]), be: ["A8"], br: [], pub: true, scan: 0, trace: null};
 function demo(p, body) {
   const up = 7 * 3600 + Math.floor((Date.now() - D.t0) / 1000), rnd = (a, b) => a + Math.random() * (b - a);
@@ -1433,6 +1455,7 @@ function demo(p, body) {
     nf_recent: Array.from({length: 60}, (_, i) => -115 + Math.round(Math.sin(i / 5) * 2 + rnd(-1, 1))), last_rx: {snr: -9.3, rssi: -123, ago: 12, hops: 3, type: 8, from: "DA"},
     air24: {tx_ms: 160000, rx_ms: 520000, span_s: 25200}, air_total: {tx_ms: 160000, rx_ms: 520000},
     // ?heltec in the address: Heltec V4 sample (battery tile, ESP32-S3 firmware check)
+    dl: {sent: 24, echo: 21, resent: 4, failed: 1, asks_tx: 0, asks_rx: 1, parts: 1, dup: 0},
     lan: {state: "linked", port: 4280, hops: 2, rx: 412, tx: 388, dup: 57, bad: 0, replay: 0, rate_drop: 3, hop_drop: 0, peers: [{ip: "192.168.0.51", name: "Demo North", fixed: false, ago: 12, rx: 412, tx: 0}]},
     ...(/heltec/.test(location.search) ? {board: "Heltec V4", board_id: "heltec_v4", chip_id: 9, batt_mv: 3870, diy_version: "v1.4.0-mc1.18.0-20261120"} : {board_id: "e22wroom", chip_id: 0})});
   if (p === "/api/setup") return body ? r({ok: true, reboot: !!body.freq, wifi: !!body.ssid})
@@ -1442,10 +1465,10 @@ function demo(p, body) {
   if (p === "/api/update") return r({mode: 1, beta: false, key: true, rolled_back: false, progress: 0, checked_ago: 3600, state: "idle", url: "https://github.com/example/senkophone/releases/latest/download/manifest.json", available: "v1.4.0-e22wroom-mc1.18.0-20261120", channel: "release", error: ""});
   if (p.startsWith("/api/chat")) {
     const ch = +(body ? body.ch : (p.split("ch=")[1] || 0)) || 0, list = ch ? (D.xch[ch] || {m: []}).m : D.chat;
-    if (body) { list.push([++D.cseq, Math.floor(Date.now() / 1000), 1, "Demo Repeater", body.text, null]); return r({ok: true}); }
+    if (body) { const m = [++D.cseq, Math.floor(Date.now() / 1000), 1, "Demo Repeater", body.text, null, 1, 0, 0]; list.push(m); setTimeout(() => { m[6] = 2; m[7] = 2; D.cver = (D.cver || 0) + 1; }, 4000); return r({ok: true}); }
     const chans = [[0, "Дом", true, 0x4f, D.chat[D.chat.length - 1][0]]];
     for (let i = 1; i <= 4; i++) { const x = D.xch[i]; chans.push([i, x ? x.name : "", !!x, x ? 0x11 * i : 0, x && x.m.length ? x.m[x.m.length - 1][0] : 0]); }
-    return r({ch, set: ch ? !!D.xch[ch] : true, queued: 0, qch: 0, name: ch ? (D.xch[ch] || {}).name : "Дом", self: "Demo Repeater", chans, m: list});
+    return r({ch, set: ch ? !!D.xch[ch] : true, queued: 0, qch: 0, name: ch ? (D.xch[ch] || {}).name : "Дом", self: "Demo Repeater", ver: D.cver || 0, chans, m: list});
   }
   if (p === "/api/watch") return r({w: [["48A1", "Alpha Rep", 6, 70, false], ["DE00", "Echo Rep", 6, 12, false], ["30AA", "Charlie Rep", 12, 50400, true]]});
   if (p === "/api/stats") return r({});
@@ -1476,8 +1499,8 @@ function demo(p, body) {
   if (p === "/api/nodes") {
     if (body) { if (body.action === "scan") D.scan = Date.now(); return r({ok: true, msg: "scan sent"}); }
     return r({scanning: Date.now() - D.scan < 8000, scan_age: Math.floor((Date.now() - D.scan) / 1000), n: [
-      {id: "48A1B2C3D4E5F607", name: "Alpha Rep", type: 2, seen: 7, hops: 0, ago: 70, count: 12, snr: 1.0, rssi: -96, their_snr: 2.5, lat: 55.7801, lon: 37.5702},
-      {id: "6A11223344556677", name: "Bravo Rep", type: 2, seen: 3, hops: 0, ago: 986, count: 40, snr: -14, rssi: -121, lat: 55.7105, lon: 37.7403},
+      {id: "48A1B2C3D4E5F607", name: "Alpha Rep", type: 2, seen: 7, hops: 0, ago: 70, count: 12, snr: 1.0, rssi: -96, their_snr: 2.5, lat: 55.7801, lon: 37.5702, senko: 0x16, relay_h: 37, relay: 412, relay_ago: 25},
+      {id: "6A11223344556677", name: "Bravo Rep", type: 2, seen: 3, hops: 0, ago: 986, count: 40, snr: -14, rssi: -121, lat: 55.7105, lon: 37.7403, relay_h: 4, relay: 96, relay_ago: 640},
       {id: "30AABBCC00000000", name: "Charlie Rep", type: 2, seen: 1, hops: 3, ago: 1665, count: 2, lat: 55.6502, lon: 37.4801},
       {id: "9A0011223344AABB", name: "Delta phone", type: 1, seen: 1, hops: 2, ago: 400, count: 3, lat: 55.7604, lon: 37.6402},
       {id: "DE00AA1100000000", name: "Echo Rep", type: 2, seen: 11, hops: 0, ago: 12, count: 90, snr: -9.3, rssi: -123}]});
@@ -1495,7 +1518,7 @@ function demo(p, body) {
     return r({pending: !done, ok: done, sent: true, rtt_ms: 2140, sz: 1, hops: full.map(id => done ? {id, snr: +rnd(-12, 9).toFixed(2)} : {id}), final_snr: done ? 3.25 : null});
   }
   if (p === "/api/prefs") return r({name: "Demo Repeater", owner: "demo", lat: 55.7520, lon: 37.6175, freq: 868.918, bw: 62.5, sf: 9, cr: 7, tx: 22, rxgain: 1, repeat: 1, adv_int: 60, fadv_int: 47, fmax: 64, fmax_uns: 64,
-    fmax_adv: 8, loop: 0, hash_mode: 0, af: 1.0, rxdelay: 0, txdelay: 0.5, dtxdelay: 0.3, int_thresh: 0, cad: 0, agc: 0, multi_acks: 0, adc_mult: 0, read_only: 0, has_guest: false, regions: "*^ F", region_home: " home is *", wifi_ssid: "DemoWiFi", web_pwd_set: false, lan_on: 1, lan_hops: 2, lan_port: 4280, lan_secret_set: true, lan_peers: "10.8.0.3", mqtt_on: 1, mqtt_host: "192.168.0.10", mqtt_port: 1883, mqtt_user: "repeater", mqtt_int: 60, mqtt_state: "connected", home_set: true, home_name: "Дом", home_rx: 12, home_tx: 5});
+    fmax_adv: 8, loop: 0, hash_mode: 0, af: 1.0, rxdelay: 0, txdelay: 0.5, dtxdelay: 0.3, int_thresh: 0, cad: 0, agc: 0, multi_acks: 0, adc_mult: 0, read_only: 0, has_guest: false, regions: "*^ F", region_home: " home is *", wifi_ssid: "DemoWiFi", web_pwd_set: false, lan_on: 1, lan_hops: 2, lan_port: 4280, lan_secret_set: true, lan_peers: "10.8.0.3", mqtt_on: 1, mqtt_host: "192.168.0.10", mqtt_port: 1883, mqtt_user: "repeater", mqtt_int: 60, mqtt_alert: 1, dl_retry: 2, dl_ask: 0, mqtt_state: "connected", home_set: true, home_name: "Дом", home_rx: 12, home_tx: 5});
   if (p === "/api/cli") {
     const a = body.cmd.split(" ");
     if (a[0] === "chan" && a[1] === "add") {

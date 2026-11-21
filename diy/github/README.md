@@ -40,6 +40,8 @@ SenkoOS — это обычный ретранслятор [MeshCore](https://gi
 | 🔋 **Батарея** | напряжение на Heltec V3 / V4 — в панели, на экране и в Home Assistant |
 | 🌡 **Датчики I2C** | BME/BMP280, AHT, SHT, INA и другие находятся сами и уходят в HA и в телеметрию MeshCore |
 | 🔗 **Мост LAN** | несколько ретрансляторов на одной точке (антенны в разные стороны) обмениваются пакетами по Wi-Fi, а не по эфиру; подпись HMAC, поиск узлов в сети сам |
+| ✓ **Доставка** | отметка «услышан ретранслятором» у своих сообщений, повтор без эха, дозапрос потерянных частей длинного текста между платами SenkoOS |
+| 🧪 **Метка SenkoOS** | платы SenkoOS видят друг друга: колба на карте и в списке узлов; транзит через каждый репитер за час |
 | 📡 **Радио не ждёт** | загрузка прошивки по Wi-Fi идёт в отдельной задаче — ретрансляция не прерывается |
 
 ## Поддерживаемые платы
@@ -206,6 +208,8 @@ SenkoOS — неофициальная сборка поверх [MeshCore](http
 - a private **"Home" channel** bridged to Home Assistant — commands and notifications in a normal MeshCore chat — plus up to 4 more channels (key, #hashtag, Public) to chat from the browser;
 - **signed OTA updates** per board (Ed25519 manifest, SHA-256 and chip check, automatic rollback after failed boots), installed without stopping packet forwarding;
 - a **LAN bridge**: several repeaters at one site (antennas in different directions) exchange packets over Wi-Fi instead of the air (HMAC-signed UDP, automatic discovery);
+- **delivery marks**: "heard re-sent by N repeaters" on our own chat messages, a resend when there is no echo, and SenkoOS boards ask for lost parts of long texts;
+- a **SenkoOS mark** in the advert: SenkoOS boards show each other on the map, plus transit traffic through every repeater;
 - an **OLED** UI: 128×128 on SenkoPhone, 128×64 on Heltec.
 
 | Board | Release file | `--chip` |

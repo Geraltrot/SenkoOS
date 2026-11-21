@@ -31,6 +31,7 @@ void MqttLink::load() {
     p.getString("mq_user", _user, sizeof(_user));
     p.getString("mq_pwd", _pwd, sizeof(_pwd));
     _interval = p.getUShort("mq_int", 60);
+    _alert = p.getUChar("mq_alert", 1) != 0;
     p.end();
   }
   if (_interval < 30 || _interval > 3600) _interval = 60;
@@ -46,6 +47,7 @@ void MqttLink::save() {
     p.putString("mq_user", _user);
     p.putString("mq_pwd", _pwd);
     p.putUShort("mq_int", _interval);
+    p.putUChar("mq_alert", _alert ? 1 : 0);
     p.end();
   }
 }
@@ -153,6 +155,7 @@ void MqttLink::loop() {
   bool wifi_ok = _wifi && _wifi->isConnected();
   if (_on && _host[0] && wifi_ok && !_client) start();
   else if ((!_on || !wifi_ok) && _client) stop();
+  loopAlert(wifi_ok);
   if (!_connected) return;
 
   if (_need_subscribe) {
@@ -474,6 +477,39 @@ void MqttLink::publishState() {
 // ---------------------------------------------------------------------------
 //  CLI (local only: USB and the web console)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//  broker lost / back: a message to the channel "Home" (over LoRa, so it arrives without Wi-Fi too).
+//  Only after the link was up once since boot; after 2 min without the broker; at most one
+//  "lost" message per 30 min, so a flapping link does not flood the air.
+// ---------------------------------------------------------------------------
+static const uint32_t ALERT_AFTER_MS = 120000, ALERT_EVERY_MS = 1800000;
+
+void MqttLink::loopAlert(bool wifi_ok) {
+  uint32_t now = millis();
+  if (!_on || !_host[0]) { _was_up = false; _down_ms = 0; _alert_state = 0; return; }
+  if (_connected) {
+    _was_up = true;
+    _down_ms = 0;
+    if (_alert_state == 1 || _alert_state == 3) _alert_state = 3;   // "back" still to be sent
+    else _alert_state = 0;
+  } else if (_was_up && !_down_ms) {
+    _down_ms = now | 1;
+  }
+  if (!_alert || !_mesh || !_mesh->homeChannelSet()) return;
+  char msg[160];
+  if (_alert_state == 3) {   // link is back after a "lost" message
+    unsigned mins = (unsigned)((now - _alert_lost_ms) / 60000) + 1;
+    snprintf(msg, sizeof(msg), "MQTT: связь с брокером восстановлена, перерыв ~%u мин.", mins);
+    if (_mesh->queueHomeChat(msg)) _alert_state = 0;
+    return;
+  }
+  if (_alert_state == 0 && _down_ms && now - _down_ms >= ALERT_AFTER_MS && (!_alert_last_ms || now - _alert_last_ms >= ALERT_EVERY_MS)) {
+    snprintf(msg, sizeof(msg), "MQTT: нет связи с брокером %u мин (%s), HA не получает сообщения.",
+             (unsigned)((now - _down_ms) / 60000), wifi_ok ? "Wi-Fi есть" : "нет Wi-Fi");
+    if (_mesh->queueHomeChat(msg)) { _alert_state = 1; _alert_last_ms = now; _alert_lost_ms = _down_ms; }
+  }
+}
+
 bool MqttLink::handleCommand(const char* command, char* reply, size_t reply_len) {
   if (strncmp(command, "mqtt", 4) != 0 || (command[4] != 0 && command[4] != ' ')) return false;
   const char* arg = command + 4;
@@ -481,8 +517,9 @@ bool MqttLink::handleCommand(const char* command, char* reply, size_t reply_len)
   bool restart = false;
 
   if (*arg == 0) {
-    snprintf(reply, reply_len, "mqtt: %s, broker %s:%u, user '%s', password %s, every %u s, topic %s",
-             stateText(), _host[0] ? _host : "-", (unsigned)_port, _user, _pwd[0] ? "set" : "empty", (unsigned)_interval, _topic_base);
+    snprintf(reply, reply_len, "mqtt: %s, broker %s:%u, user '%s', password %s, every %u s, topic %s, alert %s",
+             stateText(), _host[0] ? _host : "-", (unsigned)_port, _user, _pwd[0] ? "set" : "empty", (unsigned)_interval, _topic_base,
+             _alert ? "on" : "off");
     return true;
   } else if (strncmp(arg, "host ", 5) == 0) {
     strlcpy(_host, arg + 5, sizeof(_host));
@@ -515,12 +552,15 @@ bool MqttLink::handleCommand(const char* command, char* reply, size_t reply_len)
     _on = false;
     snprintf(reply, reply_len, "OK - mqtt off");
     restart = true;
+  } else if (strcmp(arg, "alert on") == 0 || strcmp(arg, "alert off") == 0) {
+    _alert = arg[7] == 'n';
+    snprintf(reply, reply_len, "OK - broker loss message to the Home channel %s", _alert ? "on" : "off");
   } else if (strcmp(arg, "discovery") == 0) {
     _need_discovery = _connected;
     snprintf(reply, reply_len, _connected ? "OK - discovery will be sent" : "Err - not connected");
     return true;
   } else {
-    snprintf(reply, reply_len, "Err - mqtt [host <h>|port <n>|user <u>|pwd <p>|interval <s>|on|off|discovery]");
+    snprintf(reply, reply_len, "Err - mqtt [host <h>|port <n>|user <u>|pwd <p>|interval <s>|on|off|alert on|off|discovery]");
     return true;
   }
   save();

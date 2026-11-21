@@ -139,11 +139,27 @@ const char* WebPanel::loginPassword() {
   return _web_pwd[0] ? _web_pwd : _mesh->getNodePrefs()->password;
 }
 
-bool WebPanel::authorized() {
+// session cookie "s_<first 2 bytes of the node key>": browsers keep cookies per host, not per port,
+// so two boards behind one NAT address (different ports) must not share a cookie name
+const char* WebPanel::cookieName() {
+  if (!_cookie[0]) snprintf(_cookie, sizeof(_cookie), "s_%02X%02X", _mesh->self_id.pub_key[0], _mesh->self_id.pub_key[1]);
+  return _cookie;
+}
+
+String WebPanel::sessionToken() {
   String cookie = server.header("Cookie");
-  int p = cookie.indexOf("s=");
-  if (p < 0) return false;
-  String token = cookie.substring(p + 2, p + 2 + 32);
+  String key = String(cookieName()) + "=";
+  int p = 0;
+  while ((p = cookie.indexOf(key, p)) >= 0) {
+    if (p == 0 || cookie[p - 1] == ' ' || cookie[p - 1] == ';') return cookie.substring(p + key.length(), p + key.length() + 32);
+    p += key.length();
+  }
+  return String();
+}
+
+bool WebPanel::authorized() {
+  String token = sessionToken();
+  if (token.length() != 32) return false;
   uint32_t now = millis();
   for (auto& s : _sessions) {
     if (s.token[0] && now - s.last_used < SESSION_IDLE_MS && constTimeEquals(s.token, token.c_str())) {
@@ -197,18 +213,15 @@ void WebPanel::handleLogin() {
   for (int i = 0; i < 16; i++) sprintf(&slot->token[i * 2], "%02x", (unsigned)(esp_random() & 0xFF));
   slot->last_used = now;
 
-  server.sendHeader("Set-Cookie", String("s=") + slot->token + "; Path=/; HttpOnly; SameSite=Strict");
+  server.sendHeader("Set-Cookie", String(cookieName()) + "=" + slot->token + "; Path=/; HttpOnly; SameSite=Strict");
   sendOk();
 }
 
 void WebPanel::handleLogout() {
-  String cookie = server.header("Cookie");
-  int p = cookie.indexOf("s=");
-  if (p >= 0) {
-    String token = cookie.substring(p + 2, p + 2 + 32);
+  String token = sessionToken();
+  if (token.length() == 32)
     for (auto& s : _sessions) if (s.token[0] && constTimeEquals(s.token, token.c_str())) s.token[0] = 0;
-  }
-  server.sendHeader("Set-Cookie", "s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
+  server.sendHeader("Set-Cookie", String(cookieName()) + "=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
   sendOk();
 }
 
@@ -304,6 +317,12 @@ void WebPanel::handleStatus() {
   j.f(",\"air24\":{\"tx_ms\":%lu,\"rx_ms\":%lu,\"span_s\":%lu}", (unsigned long)tx24, (unsigned long)rx24,
       (unsigned long)(n24 ? (n24 * 600UL < now_ms / 1000 ? n24 * 600UL : now_ms / 1000) : 0));
   lan_bridge.writeStatus(j);
+  {
+    const auto& d = _mesh->dl;
+    j.f(",\"dl\":{\"sent\":%lu,\"echo\":%lu,\"resent\":%lu,\"failed\":%lu,\"asks_tx\":%lu,\"asks_rx\":%lu,\"parts\":%lu,\"dup\":%lu}",
+        (unsigned long)d.sent, (unsigned long)d.echoed, (unsigned long)d.resent, (unsigned long)d.failed, (unsigned long)d.asks_tx,
+        (unsigned long)d.asks_rx, (unsigned long)d.parts_resent, (unsigned long)d.dups);
+  }
   j.f(",\"air_total\":{\"tx_ms\":%lu,\"rx_ms\":%lu}", (unsigned long)_mesh->airTxMs(), (unsigned long)_mesh->airRxMs());
   j.raw("}");
   j.end();
@@ -497,6 +516,9 @@ void WebPanel::handleNodes() {
     if (n.snr4 != -128) j.f(",\"snr\":%.2f,\"rssi\":%d", n.snr4 / 4.0f, n.rssi);
     if (n.their_snr4 != -128) j.f(",\"their_snr\":%.2f", n.their_snr4 / 4.0f);
     if (n.lat || n.lon) j.f(",\"lat\":%.5f,\"lon\":%.5f", n.lat / 1e6, n.lon / 1e6);
+    if (n.senko) j.f(",\"senko\":%u", n.senko & 0x7F);   // SenkoOS board: version byte (0x16 = v1.6, 0 = dev)
+    if (n.relay_total) j.f(",\"relay_h\":%lu,\"relay\":%lu,\"relay_ago\":%lu", (unsigned long)_mesh->relayHour(n),
+                           (unsigned long)n.relay_total, (unsigned long)((now - n.relay_last_ms) / 1000));
     j.raw("}");
   }
   j.raw("]}");
@@ -608,8 +630,10 @@ void WebPanel::handlePrefs() {
       (unsigned long)_mesh->home_rx, (unsigned long)_mesh->home_tx);
   j.raw(",\"home_name\":").str(_mesh->homeChannelName());
   lan_bridge.writePrefs(j);   // the bridge secret is never sent back
+  j.f(",\"dl_retry\":%u,\"dl_ask\":%u", _mesh->dl_retry, _mesh->dl_ask ? 1 : 0);
   if (_mqtt) {   // the broker password is never sent back
-    j.f(",\"mqtt_on\":%u,\"mqtt_port\":%u,\"mqtt_int\":%u", _mqtt->enabled() ? 1 : 0, (unsigned)_mqtt->port(), (unsigned)_mqtt->interval());
+    j.f(",\"mqtt_on\":%u,\"mqtt_port\":%u,\"mqtt_int\":%u,\"mqtt_alert\":%u", _mqtt->enabled() ? 1 : 0, (unsigned)_mqtt->port(),
+        (unsigned)_mqtt->interval(), _mqtt->alertOn() ? 1 : 0);
     j.raw(",\"mqtt_host\":").str(_mqtt->host()).raw(",\"mqtt_user\":").str(_mqtt->user()).raw(",\"mqtt_state\":").str(_mqtt->stateText());
   }
   j.raw("}");
@@ -809,7 +833,8 @@ void WebPanel::handleChat() {
   int c = chatChan(server.arg("ch"));
   JsonOut j(server);
   j.begin();
-  j.f("{\"ch\":%d,\"set\":%s,\"queued\":%d,\"qch\":%d,\"name\":", c, _mesh->chanSet(c) ? "true" : "false", _mesh->homeQueued(), _mesh->queuedChan());
+  j.f("{\"ch\":%d,\"set\":%s,\"queued\":%d,\"qch\":%d,\"ver\":%lu,\"name\":", c, _mesh->chanSet(c) ? "true" : "false", _mesh->homeQueued(),
+      _mesh->queuedChan(), (unsigned long)_mesh->chatVersion());
   j.str(_mesh->chanName(c)).raw(",\"self\":").str(_mesh->getNodePrefs()->node_name).raw(",\"chans\":[");
   for (int i = 0; i < DiyMesh::NUM_CH; i++) {   // [index, name, set, hash, last seq]
     if (i) j.raw(",");
@@ -820,7 +845,8 @@ void WebPanel::handleChat() {
     const DiyMesh::ChatMsg& m = _mesh->chatAt(c, i);
     if (i) j.raw(",");
     j.f("[%lu,%lu,%u,", (unsigned long)m.seq, (unsigned long)m.ts, m.out).str(m.from).raw(",").str(m.text);
-    if (m.out) j.raw(",null]"); else j.f(",%.2f]", m.snr4 / 4.0f);
+    // [seq, ts, out, from, text, snr|null, delivery (0 n/a, 1 sending, 2 echo, 3 no echo), echoes, resends]
+    if (m.out) j.f(",null,%u,%u,%u]", m.dl, m.echo, m.tries); else j.f(",%.2f,0,0,0]", m.snr4 / 4.0f);
   }
   j.raw("]}");
   j.end();

@@ -26,6 +26,7 @@ void DiyMesh::beginDiy() {
 void DiyMesh::loopDiy() {
   uint32_t now = millis();
   loopHome();   // queued parts of long messages to the channel "Home"
+  loopDelivery();   // echo check, resends, missing-part requests
   loopWatch();  // watched neighbours: alarm when silent
 
   // noise floor every 4 s
@@ -74,6 +75,10 @@ void DiyMesh::loopDiy() {
       }
     }
     _minutes_in_ten = (_minutes_in_ten + 1) % 10;
+    if (_minutes_in_ten == 0) {   // transit counters: next 10-minute slot
+      _relay_slot = (_relay_slot + 1) % 6;
+      for (int i = 0; i < num_nodes; i++) nodes[i].relay10[_relay_slot] = 0;
+    }
   }
 
   if (trace.pending && now - trace.sent_ms > TRACE_TIMEOUT_MS) {
@@ -90,6 +95,7 @@ void DiyMesh::logRx(mesh::Packet* pkt, int len, float score) {
   int16_t rssi = (int16_t)_radio->getLastRSSI();
   addLog(0, pkt, len, pkt->_snr, rssi);
   notePacketRx(pkt, pkt->_snr, rssi);
+  noteOutEcho(pkt);
   if (_rx_hook) _rx_hook(pkt);   // LAN bridge: pass on to the other repeaters
 }
 
@@ -106,6 +112,7 @@ bool DiyMesh::injectPacket(const uint8_t* raw, int len) {
 
 void DiyMesh::logTx(mesh::Packet* pkt, int len) {
   MyMesh::logTx(pkt, len);
+  noteOutTx(pkt);
   tx_by_type[pkt->getPayloadType() & 15]++;
   if (pkt->isRouteFlood()) tx_flood++; else tx_direct++;
   addLog(1, pkt, len, 0, 0);
@@ -113,6 +120,7 @@ void DiyMesh::logTx(mesh::Packet* pkt, int len) {
 
 void DiyMesh::logTxFail(mesh::Packet* pkt, int len) {
   MyMesh::logTxFail(pkt, len);
+  noteOutTx(pkt);   // the echo window starts anyway: no echo -> resend
   tx_fail++;
   addLog(2, pkt, len, 0, 0);
 }
@@ -169,6 +177,23 @@ void DiyMesh::notePacketRx(const mesh::Packet* pkt, int8_t snr4, int16_t rssi) {
       n->seen |= SEEN_DIRECT | SEEN_PATH;
       n->snr4 = snr4; n->rssi = rssi; n->last_ms = now; n->count++;
       if (!n->type) n->type = ADV_TYPE_REPEATER;
+    }
+  }
+
+  // transit: every repeater in the path of a flood packet passed it on (counted only when the
+  // hash prefix matches exactly one known repeater, short prefixes collide)
+  if (pkt->isRouteFlood()) {
+    for (int k = 0; k < hops; k++) {
+      const uint8_t* h = &pkt->path[k * sz];
+      NodeInfo* hit = nullptr;
+      int matches = 0;
+      for (int i = 0; i < num_nodes && matches < 2; i++) {
+        NodeInfo& x = nodes[i];
+        if (x.known < sz || memcmp(x.pub, h, sz) != 0) continue;
+        if (x.type && x.type != ADV_TYPE_REPEATER && x.type != ADV_TYPE_ROOM) continue;
+        hit = &x; matches++;
+      }
+      if (matches == 1) { hit->relay10[_relay_slot]++; hit->relay_total++; hit->relay_last_ms = now; }
     }
   }
 
@@ -401,6 +426,8 @@ void DiyMesh::onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, uint3
     n->type = parser.getType();
     if (parser.getName()) strlcpy(n->name, parser.getName(), sizeof(n->name));
     if (parser.hasLatLon()) { n->lat = parser.getIntLat(); n->lon = parser.getIntLon(); }
+    uint16_t f2 = parser.getFeat2();
+    n->senko = (app_data_len && (app_data[0] & ADV_FEAT2_MASK) && (f2 >> 8) == SENKO_MARK) ? (uint8_t)(0x80 | (f2 & 0x7F)) : 0;
   }
   n->seen |= SEEN_ADVERT;
   n->hops = packet->getPathHashCount();

@@ -130,13 +130,16 @@ int DiyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channe
 }
 
 void DiyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) {
-  if (type != PAYLOAD_TYPE_GRP_TXT || len < 6) return;
   int c = -1;
   for (int i = 0; i < NUM_CH && c < 0; i++) {
     const mesh::GroupChannel* k = chanKey(i);
     if (k && memcmp(channel.secret, k->secret, sizeof(k->secret)) == 0) c = i;
   }
   if (c < 0) return;
+  if (type == PAYLOAD_TYPE_GRP_DATA) { onSenkoData(c, data, (int)len); return; }   // missing-part requests
+  if (type != PAYLOAD_TYPE_GRP_TXT || len < 6) return;
+  uint32_t ts;
+  memcpy(&ts, data, 4);
   if ((data[4] >> 2) != 0) return;   // plain text only
   data[len] = 0;
   char* text = (char*)&data[5];
@@ -149,13 +152,14 @@ void DiyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gr
     text = sep + 2;
   }
   if (strcmp(sender, getNodePrefs()->node_name) == 0) return;   // our own message heard back
+  if (!notePart(c, sender, text, ts)) { dl.dups++; return; }       // a part we already have (re-sent on request)
   addChat(c, 0, sender, text, (int8_t)(packet->getSNR() * 4));
   if (c > 0) { _xch[c - 1].rx++; return; }   // extra channels: panel only, not Home Assistant
   home_rx++;
   if (_home_chat_fn) _home_chat_fn(sender, text, (int8_t)(packet->getSNR() * 4), packet->getPathHashCount());
 }
 
-bool DiyMesh::sendChat(int c, const char* text) {
+bool DiyMesh::sendChat(int c, const char* text, bool part, uint32_t* ts_out) {
   const mesh::GroupChannel* key = chanKey(c);
   if (!key || !text || !text[0]) return false;
   // one group packet carries at most MAX_GROUP_DATA_LENGTH bytes: timestamp(4) + type(1) + "<name>: <text>"
@@ -173,13 +177,16 @@ bool DiyMesh::sendChat(int c, const char* text) {
   }
   mesh::Packet* pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, *key, temp, 5 + n);
   if (!pkt) return false;
-  sendFlood(pkt, (uint32_t)0, (uint8_t)(getNodePrefs()->path_hash_mode + 1));
+  if (ts_out) *ts_out = ts;
   if (c == 0) home_tx++; else _xch[c - 1].tx++;
-  { const char* body = strstr((const char*)&temp[5], ": "); addChat(c, 1, getNodePrefs()->node_name, body ? body + 2 : (const char*)&temp[5], 0); }
+  const char* body = strstr((const char*)&temp[5], ": ");
+  uint32_t seq = addChat(c, 1, getNodePrefs()->node_name, body ? body + 2 : (const char*)&temp[5], 0);
+  trackOut(c, pkt, seq, part);   // before sendFlood: the packet may be freed once sent
+  sendFlood(pkt, (uint32_t)0, (uint8_t)(getNodePrefs()->path_hash_mode + 1));
   return true;
 }
 
-void DiyMesh::addChat(int c, uint8_t out, const char* from, const char* text, int8_t snr4) {
+uint32_t DiyMesh::addChat(int c, uint8_t out, const char* from, const char* text, int8_t snr4) {
   int k = c ? CHAT_KEEP_X : CHAT_KEEP, b = c ? CHAT_KEEP + (c - 1) * CHAT_KEEP_X : 0;
   ChatMsg& m = _chat[b + _chat_head[c]];
   m.seq = ++_chat_seq;
@@ -187,15 +194,29 @@ void DiyMesh::addChat(int c, uint8_t out, const char* from, const char* text, in
   m.ts = getRTCClock()->getCurrentTime();
   m.out = out;
   m.snr4 = snr4;
+  m.dl = out ? 1 : 0; m.echo = 0; m.tries = 0;
+  _chat_ver++;
   strlcpy(m.from, from ? from : "", sizeof(m.from));
   strlcpy(m.text, text ? text : "", sizeof(m.text));
   _chat_head[c] = (_chat_head[c] + 1) % k;
   if (_chat_n[c] < k) _chat_n[c]++;
+  return m.seq;
+}
+
+DiyMesh::ChatMsg* DiyMesh::chatBySeq(int c, uint32_t seq) {
+  if (c < 0 || c >= NUM_CH || !seq) return nullptr;
+  for (int i = _chat_n[c] - 1; i >= 0; i--) {
+    ChatMsg& m = const_cast<ChatMsg&>(chatAt(c, i));
+    if (m.seq == seq) return &m;
+    if (m.seq < seq) break;
+  }
+  return nullptr;
 }
 
 // ---------------------------------------------------------------------------
-//  long messages: split into parts that fit one packet, sent 12 s apart
-//  (back-to-back flood packets arrive out of order)
+//  long messages: split into parts that fit one packet, sent at least 12 s apart
+//  (back-to-back flood packets arrive out of order); with the echo check on, the next part
+//  waits until the previous one was heard re-sent by a repeater (or all its resends are used)
 // ---------------------------------------------------------------------------
 static const uint32_t PART_GAP_MS = 12000;
 
@@ -214,8 +235,8 @@ bool DiyMesh::queueChat(int c, const char* text) {
   int len = strlen(text);
   // room for the text in one packet: data = timestamp(4) + type(1) + "<name>: " + text
   int room = MAX_GROUP_DATA_LENGTH - 5 - (int)strlen(getNodePrefs()->node_name) - 2;
-  if (len <= room && homeQueued() == 0) return sendChat(c, text);
-  if (homeQueued() > 0) return false;   // previous long message still being sent
+  if (len <= room && homeQueued() == 0) return sendChat(c, text);   // short: at once
+  if (homeQueued() > 0) return false;   // previous long message (or parts asked for again) still being sent
   int room_part = room - 7;             // " [1/6]"
   if (room_part < 20) return false;
   int starts[HOME_MAX_PARTS], lens[HOME_MAX_PARTS], n = 0, pos = 0;
@@ -235,12 +256,26 @@ bool DiyMesh::queueChat(int c, const char* text) {
   _home_parts_i = 0;
   _home_parts_ch = c;
   _home_next_ms = millis();
+  _lm_n = (uint8_t)n; _lm_ch = (uint8_t)c; _lm_answers = 0; _lm_resend = 0; _lm_ms = millis();
+  memset(_lm_ts, 0, sizeof(_lm_ts)); memset(_lm_ts0, 0, sizeof(_lm_ts0));
   return true;
 }
 
 void DiyMesh::loopHome() {
-  if (_home_parts_i >= _home_parts_n || (int32_t)(millis() - _home_next_ms) < 0) return;
-  sendChat(_home_parts_ch, _home_parts[_home_parts_i++]);
+  if ((int32_t)(millis() - _home_next_ms) < 0 || partInFlight()) return;
+  int i = -1;
+  bool again = false;
+  if (_home_parts_i < _home_parts_n) i = _home_parts_i++;
+  else if (_lm_resend) { i = __builtin_ctz(_lm_resend); _lm_resend &= ~(1u << i); again = true; }   // asked for again
+  if (i < 0) return;
+  if (i < _lm_n && chanSet(_lm_ch)) {
+    uint32_t ts = 0;
+    if (sendChat(_lm_ch, _home_parts[i], true, &ts)) {
+      _lm_ts[i] = ts;
+      if (!_lm_ts0[i]) _lm_ts0[i] = ts;
+      if (again) dl.parts_resent++;
+    }
+  }
   _home_next_ms = millis() + PART_GAP_MS;
   if (_home_parts_i >= _home_parts_n) _home_parts_n = _home_parts_i = 0;
 }
@@ -354,6 +389,7 @@ bool DiyMesh::handleChanCommand(const char* command, char* reply, size_t reply_l
     int c = chanIndex(arg + 4);
     if (!c || !_xch[c - 1].len) { snprintf(reply, reply_len, "Err - no channel %s", arg + 4); return true; }
     if (homeQueued() > 0 && _home_parts_ch == c) _home_parts_n = _home_parts_i = 0;
+    if (_lm_ch == c) _lm_n = _lm_resend = 0;
     memset(&_xch[c - 1], 0, sizeof(ExtraChan));
     _chat_n[c] = _chat_head[c] = 0;
     saveChans();
